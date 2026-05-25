@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "monolythium-protocore",
+  "description": "Release index for the protocore node binary. Each entry corresponds to a GitHub Release tag on this repository (https://github.com/monolythium/protocore/releases). Tools can read this file to discover the latest compatible release for a given channel without scraping the Releases page. The empty arrays below populate as releases are cut.",
+  "channels": {
+    "testnet": [],
+    "mainnet": []
+  },
+  "entry_shape": {
+    "description": "Documentation-only — the shape every release entry should follow once populated.",
+    "example": {
+      "tag": "v0.0.1-testnet",
+      "channel": "testnet",
+      "released_at": "2026-XX-XXTHH:MM:SSZ",
+      "platforms": {
+        "x86_64-linux": {
+          "asset": "protocore-v0.0.1-testnet-x86_64-linux.tar.gz",
+          "sha256": "<64-hex-digest>",
+          "signature": "protocore-v0.0.1-testnet-x86_64-linux.tar.gz.sig",
+          "certificate": "protocore-v0.0.1-testnet-x86_64-linux.tar.gz.pem",
+          "sbom": "protocore-v0.0.1-testnet-x86_64-linux.tar.gz.spdx.json"
+        }
+      },
+      "compatibility": {
+        "mono_core_commit": "<12-char-sha>",
+        "talos_version": "v1.13.0",
+        "monarch_os_talos_tag": "v0.0.0-preview",
+        "core_sdk_version": "0.1.0",
+        "monarch_desktop_tag": "v0.0.0-preview"
+      },
+      "release_notes_url": "https://github.com/monolythium/protocore/releases/tag/v0.0.1-testnet"
+    }
+  }
+}

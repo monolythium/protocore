@@ -1,0 +1,35 @@
+# Local-only Claude Code + per-repo context (NEVER push)
+CLAUDE.md
+.claude/local/
+.claude/skills/
+TODO.md
+RESUME.md
+STATUS.md
+*.internal.md
+AUDIT-*.md
+
+# Secrets — never committed under any circumstances
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.keystore
+*.p12
+secrets/
+credentials/
+signing-keys/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local scratch / staging for releases under construction
+scratch/
+staging/
+tmp/

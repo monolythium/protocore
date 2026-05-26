@@ -63,7 +63,7 @@ jobs:
 
       - name: cargo build --release -p protocore
         working-directory: src
-        run: cargo build --release --locked -p protocore --target ${{ matrix.target }}
+        run: cargo build --release --locked -p protocore --features mdbx,indexer-postgres --target ${{ matrix.target }}
 
       - name: Stage artifacts
         id: stage

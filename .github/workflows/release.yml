@@ -1,0 +1,159 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*-testnet'
+      - 'v*-mainnet'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            asset_platform: x86_64-linux
+
+    steps:
+      - name: Checkout protocore (release repo)
+        uses: actions/checkout@v4
+
+      - name: Mint GitHub App installation token for mono-core
+        id: app_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.MONO_CORE_READ_APP_ID }}
+          private-key: ${{ secrets.MONO_CORE_READ_APP_PRIVATE_KEY }}
+          owner: monolythium
+          repositories: mono-core
+
+      - name: Checkout mono-core source
+        uses: actions/checkout@v4
+        with:
+          repository: monolythium/mono-core
+          token: ${{ steps.app_token.outputs.token }}
+          path: src
+          ref: ${{ vars.MONO_CORE_REF || 'master' }}
+          fetch-depth: 0
+
+      - name: Capture source commit
+        id: src
+        working-directory: src
+        run: |
+          commit=$(git rev-parse HEAD)
+          short=$(git rev-parse --short=12 HEAD)
+          echo "commit=$commit"        >> "$GITHUB_OUTPUT"
+          echo "short=$short"          >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.0
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+
+      - name: cargo build --release -p protocore
+        working-directory: src
+        run: cargo build --release --locked -p protocore --target ${{ matrix.target }}
+
+      - name: Stage artifacts
+        id: stage
+        env:
+          TAG: ${{ github.ref_name }}
+          PLATFORM: ${{ matrix.asset_platform }}
+        run: |
+          set -euo pipefail
+          mkdir -p out work
+          cp "src/target/${{ matrix.target }}/release/protocore" work/protocore
+          chmod 0755 work/protocore
+          asset="protocore-${TAG}-${PLATFORM}.tar.gz"
+          tar -czf "out/${asset}" -C work protocore
+          ( cd out && sha256sum "${asset}" > "${asset}.sha256" )
+          sha=$(cut -d' ' -f1 "out/${asset}.sha256")
+          echo "asset=${asset}"        >> "$GITHUB_OUTPUT"
+          echo "asset_path=out/${asset}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${sha}"         >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Cosign sign-blob (keyless OIDC)
+        env:
+          ASSET: ${{ steps.stage.outputs.asset_path }}
+        run: |
+          cosign sign-blob --yes \
+            --output-signature   "${ASSET}.sig" \
+            --output-certificate "${ASSET}.pem" \
+            "${ASSET}"
+
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          file: ${{ steps.stage.outputs.asset_path }}
+          format: spdx-json
+          output-file: ${{ steps.stage.outputs.asset_path }}.spdx.json
+
+      - name: Write release metadata
+        env:
+          TAG: ${{ github.ref_name }}
+          PLATFORM: ${{ matrix.asset_platform }}
+          ASSET: ${{ steps.stage.outputs.asset }}
+          SHA256: ${{ steps.stage.outputs.sha256 }}
+          MONO_CORE_COMMIT: ${{ steps.src.outputs.commit }}
+        run: |
+          channel="testnet"
+          case "${TAG}" in
+            *-mainnet) channel="mainnet" ;;
+          esac
+          jq -n \
+            --arg tag "${TAG}" \
+            --arg channel "${channel}" \
+            --arg released_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg asset "${ASSET}" \
+            --arg sha256 "${SHA256}" \
+            --arg signature "${ASSET}.sig" \
+            --arg certificate "${ASSET}.pem" \
+            --arg sbom "${ASSET}.spdx.json" \
+            --arg platform "${PLATFORM}" \
+            --arg mono_core_commit "${MONO_CORE_COMMIT}" \
+            '{
+              tag: $tag,
+              channel: $channel,
+              released_at: $released_at,
+              platforms: {
+                ($platform): {
+                  asset: $asset,
+                  sha256: $sha256,
+                  signature: $signature,
+                  certificate: $certificate,
+                  sbom: $sbom
+                }
+              },
+              compatibility: {
+                mono_core_commit: ($mono_core_commit[0:12])
+              }
+            }' > out/release-${TAG}.json
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-testnet') }}
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.stage.outputs.asset_path }}
+            ${{ steps.stage.outputs.asset_path }}.sha256
+            ${{ steps.stage.outputs.asset_path }}.sig
+            ${{ steps.stage.outputs.asset_path }}.pem
+            ${{ steps.stage.outputs.asset_path }}.spdx.json
+            out/release-${{ github.ref_name }}.json

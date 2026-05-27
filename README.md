@@ -2,7 +2,13 @@
 
 > Signed binary releases for **protocore** — the [Monolythium](https://monolythium.com) node binary. Source stays private until mainnet (see [why](#why-source-is-closed-for-now)); binaries are published here so testnet operators and ecosystem developers can run real nodes today.
 
-**Status:** preview · no releases yet · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
+**Status:** **testnet binaries live** · first signed release `v0.0.1-testnet` (May 2026) · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
+
+## Quick start for operators
+
+- **Run a testnet validator?** Grab the latest `v*-testnet` binary from [Releases](https://github.com/monolythium/protocore/releases), verify (steps below), point [Monarch OS](https://github.com/monolythium/monarch-os-talos) at it.
+- **Join the operator cohort.** ~50 operators are coordinating in our Discord. Invite + onboarding runbook at [`monolythium.com`](https://monolythium.com).
+- **Partial-grant program.** The Foundation sponsors 50% of the mainnet self-bond (2,500 of 5,000 LYTH) for operators who run a v2 testnet validator through to mainnet activation. Pay nothing up front beyond the testnet hardware spend; grant credits to your bond at mainnet. See [`monolythium.com/get-lyth`](https://monolythium.com/get-lyth) for the live price on the other 2,500 LYTH you bring.
 
 ---
 
@@ -25,7 +31,7 @@ Releases are organized into channels via tag prefix and the `channels` field in 
 
 | Channel | Tag prefix | Status |
 |---|---|---|
-| `testnet` | `v*-testnet` | First release pending |
+| `testnet` | `v*-testnet` | **Live** — first signed release `v0.0.1-testnet` shipped May 2026 |
 | `mainnet` | `v*-mainnet` | Reserved — no mainnet until activation milestones land |
 
 Each channel is independent: a testnet `v0.2.3-testnet` release can ship without a corresponding mainnet build, and vice versa. Compatibility metadata in each release identifies which Talos version, Monarch OS image tag, and SDK version it pairs with.

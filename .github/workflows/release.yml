@@ -39,7 +39,7 @@ jobs:
           repository: monolythium/mono-core
           token: ${{ steps.app_token.outputs.token }}
           path: src
-          ref: ${{ vars.MONO_CORE_REF || 'master' }}
+          ref: master
           fetch-depth: 0
 
       - name: Capture source commit

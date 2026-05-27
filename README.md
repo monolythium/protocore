@@ -2,7 +2,7 @@
 
 > Signed binary releases for **protocore** — the [Monolythium](https://monolythium.com) node binary. Source stays private until mainnet (see [why](#why-source-is-closed-for-now)); binaries are published here so testnet operators and ecosystem developers can run real nodes today.
 
-**Status:** **testnet binaries live** · first signed release `v0.0.1-testnet` (May 2026) · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
+**Status:** **testnet binaries shipping** · 10 signed releases live (`v0.0.1-testnet` → [`v0.0.10-testnet`](https://github.com/monolythium/protocore/releases/latest), May 2026) · cosign + SBOM on every artifact · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
 
 ## Quick start for operators
 

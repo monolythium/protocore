@@ -13,6 +13,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      PROTOCORE_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
     strategy:
       fail-fast: true
       matrix:
@@ -63,7 +65,7 @@ jobs:
 
       - name: cargo build --release -p protocore
         working-directory: src
-        run: cargo build --release --locked -p protocore --features mdbx,indexer-postgres --target ${{ matrix.target }}
+        run: cargo build --release --locked -p protocore --features "$PROTOCORE_FEATURES" --target ${{ matrix.target }}
 
       - name: Stage artifacts
         id: stage
@@ -106,6 +108,7 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           PLATFORM: ${{ matrix.asset_platform }}
+          PROTOCORE_FEATURES: ${{ env.PROTOCORE_FEATURES }}
           ASSET: ${{ steps.stage.outputs.asset }}
           SHA256: ${{ steps.stage.outputs.sha256 }}
           MONO_CORE_COMMIT: ${{ steps.src.outputs.commit }}
@@ -124,6 +127,7 @@ jobs:
             --arg certificate "${ASSET}.pem" \
             --arg sbom "${ASSET}.spdx.json" \
             --arg platform "${PLATFORM}" \
+            --arg features "${PROTOCORE_FEATURES}" \
             --arg mono_core_commit "${MONO_CORE_COMMIT}" \
             '{
               tag: $tag,
@@ -139,7 +143,8 @@ jobs:
                 }
               },
               compatibility: {
-                mono_core_commit: ($mono_core_commit[0:12])
+                mono_core_commit: ($mono_core_commit[0:12]),
+                cargo_features: ($features | split(","))
               }
             }' > out/release-${TAG}.json
 

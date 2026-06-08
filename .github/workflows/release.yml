@@ -14,7 +14,7 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     env:
-      PROTOCORE_FEATURES: mdbx,indexer-postgres,mesh
+      PROTOCORE_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
     strategy:
       fail-fast: true
       matrix:

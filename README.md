@@ -2,13 +2,13 @@
 
 > Signed binary releases for **protocore** — the [Monolythium](https://monolythium.com) node binary. Source stays private until mainnet (see [why](#why-source-is-closed-for-now)); binaries are published here so testnet operators and ecosystem developers can run real nodes today.
 
-**Status:** **testnet binaries shipping** · 16 signed releases live (`v0.0.1-testnet` → [`v0.0.16-testnet`](https://github.com/monolythium/protocore/releases/latest), May 2026) · cosign + SBOM on every artifact · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
+**Status:** **testnet binaries shipping** · 66 signed releases live (`v0.0.1-testnet` → [`v0.1.47-testnet`](https://github.com/monolythium/protocore/releases/latest), June 2026) · cosign + SBOM on every artifact · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
 
 ## Quick start for operators
 
-- **Run a testnet validator?** Grab the latest `v*-testnet` binary from [Releases](https://github.com/monolythium/protocore/releases), verify (steps below), point [Monarch OS](https://github.com/monolythium/monarch-os-talos) at it.
-- **Join the operator cohort.** The live testnet runs 12 validators + 2 relays today, and we're targeting ~50 operators ahead of mainnet — coordination happens in our Discord. Invite + onboarding runbook at [`monolythium.com`](https://monolythium.com).
-- **Partial-grant program.** The Foundation sponsors 50% of the mainnet self-bond (2,500 of 5,000 LYTH) for operators who run a v2 testnet validator through to mainnet activation. Pay nothing up front beyond the testnet hardware spend; grant credits to your bond at mainnet. See [`monolythium.com/get-lyth`](https://monolythium.com/get-lyth) for the live price on the other 2,500 LYTH you bring.
+- **Run a testnet operator node?** Grab the latest `v*-testnet` binary from [Releases](https://github.com/monolythium/protocore/releases), verify (steps below), point [Monarch OS](https://github.com/monolythium/monarch-os-talos) at it — or follow the end-to-end [operator setup guide](https://github.com/monolythium/monarch-os-talos/blob/master/docs/operator-setup.md).
+- **Join the operator cohort.** The live testnet runs 2 clusters × 10 operators (7-of-10 threshold) + 2 relays today, and we're targeting ~50 operators ahead of mainnet — coordination happens in our Discord. Invite + onboarding runbook at [`monolythium.com`](https://monolythium.com).
+- **Partial-grant program.** The Foundation sponsors 50% of the mainnet self-bond (2,500 of 5,000 LYTH) for operators who run a v2 testnet operator node through to mainnet activation. Pay nothing up front beyond the testnet hardware spend; grant credits to your bond at mainnet. See [`monolythium.com/get-lyth`](https://monolythium.com/get-lyth) for the live price on the other 2,500 LYTH you bring.
 
 ---
 
@@ -36,6 +36,8 @@ Releases are organized into channels via tag prefix and the `channels` field in 
 
 Each channel is independent: a testnet `v0.2.3-testnet` release can ship without a corresponding mainnet build, and vice versa. Compatibility metadata in each release identifies which Talos version, Monarch OS image tag, and SDK version it pairs with.
 
+Releases `v0.1.47-testnet` and later are **cluster-charter capable**: `formCluster` V2 lets a forming cluster bind its economic terms — per-member reward shares and the delegator share (20% protocol floor), plus a consent expiry — into the signed formation consent.
+
 ## Verification
 
 Every release ships with everything you need to verify the binary came from this repo's build pipeline.
@@ -43,18 +45,18 @@ Every release ships with everything you need to verify the binary came from this
 ### SHA-256
 
 ```bash
-sha256sum -c protocore-v0.0.16-testnet-x86_64-linux.tar.gz.sha256
+sha256sum -c protocore-v0.1.47-testnet-x86_64-linux.tar.gz.sha256
 ```
 
 ### Cosign keyless
 
 ```bash
 cosign verify-blob \
-  --certificate protocore-v0.0.16-testnet-x86_64-linux.tar.gz.pem \
-  --signature   protocore-v0.0.16-testnet-x86_64-linux.tar.gz.sig \
+  --certificate protocore-v0.1.47-testnet-x86_64-linux.tar.gz.pem \
+  --signature   protocore-v0.1.47-testnet-x86_64-linux.tar.gz.sig \
   --certificate-identity-regexp 'https://github.com/monolythium/protocore/.github/workflows/.+@refs/tags/v.+' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  protocore-v0.0.16-testnet-x86_64-linux.tar.gz
+  protocore-v0.1.47-testnet-x86_64-linux.tar.gz
 ```
 
 The certificate identity proves the artifact was produced by a workflow run on this repo, at a specific tag, under GitHub's OIDC issuer.
@@ -63,7 +65,7 @@ The certificate identity proves the artifact was produced by a workflow run on t
 
 ```bash
 # Inspect the SPDX SBOM
-cat protocore-v0.0.16-testnet-x86_64-linux.tar.gz.spdx.json | jq '.packages | length'
+cat protocore-v0.1.47-testnet-x86_64-linux.tar.gz.spdx.json | jq '.packages | length'
 ```
 
 ## How to use a binary

@@ -65,6 +65,14 @@ jobs:
 
       - name: cargo build --release -p protocore
         working-directory: src
+        env:
+          # Embed the exact release tag into the binary's self-reported version
+          # (rpc/runtime/p2p build.rs read this, resolution order #1) so
+          # web3_clientVersion = protocore/v2/<tag>+<commit> and Monarch's
+          # release-matcher + confirm-by-commit can map a running node to this
+          # published release. Without it the build falls back to a git-describe
+          # string and the node reports 0.1.0+<commit> (unmatchable).
+          PROTOCORE_RELEASE_TAG: ${{ github.ref_name }}
         run: cargo build --release --locked -p protocore --features "$PROTOCORE_FEATURES" --target ${{ matrix.target }}
 
       - name: Stage artifacts

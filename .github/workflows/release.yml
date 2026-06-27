@@ -41,7 +41,11 @@ jobs:
           repository: monolythium/mono-core
           token: ${{ steps.app_token.outputs.token }}
           path: src
-          ref: master
+          # Build the mono-core source at the MATCHING tag, not master — a
+          # protocore release tag vX-testnet maps to mono-core tag vX-testnet.
+          # (Master drifts ahead; pinning the tag keeps the release honest to
+          # the commit it claims.)
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - name: Capture source commit
@@ -53,27 +57,28 @@ jobs:
           echo "commit=$commit"        >> "$GITHUB_OUTPUT"
           echo "short=$short"          >> "$GITHUB_OUTPUT"
 
-      - name: Install Rust toolchain (pinned)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.93.0
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src
-
-      - name: cargo build --release -p protocore
-        working-directory: src
+      # PREBUILT PUBLISH (v0.2.2-testnet): protocore binaries embed a build
+      # timestamp (build.rs SystemTime::now), so a rebuild can never reproduce
+      # the cosigned binary the live fleet already runs. Instead of rebuilding
+      # a divergent sha, this release ingests the EXACT fleet binary
+      # (sha256 118f8647…, mono-core 6f33aa30) staged as a draft asset, and
+      # cosigns + publishes those bytes — so download == fleet == the
+      # chain-registry binary_release_sha256 pin. (Generic build path retained
+      # on main for future, reproducible-build releases.)
+      - name: Stage the prebuilt cosigned fleet binary (skip rebuild)
         env:
-          # Embed the exact release tag into the binary's self-reported version
-          # (rpc/runtime/p2p build.rs read this, resolution order #1) so
-          # web3_clientVersion = protocore/v2/<tag>+<commit> and Monarch's
-          # release-matcher + confirm-by-commit can map a running node to this
-          # published release. Without it the build falls back to a git-describe
-          # string and the node reports 0.1.0+<commit> (unmatchable).
-          PROTOCORE_RELEASE_TAG: ${{ github.ref_name }}
-        run: cargo build --release --locked -p protocore --features "$PROTOCORE_FEATURES" --target ${{ matrix.target }}
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA256: 118f86473089e76997abf6768ea964d77070977b41f0817a98dbb876decd14c9
+        run: |
+          set -euo pipefail
+          dest="src/target/${{ matrix.target }}/release"
+          mkdir -p "$dest"
+          gh release download _prebuilt-staging-v022 -R monolythium/protocore \
+            --pattern protocore -O "$dest/protocore"
+          chmod 0755 "$dest/protocore"
+          got=$(sha256sum "$dest/protocore" | cut -d' ' -f1)
+          echo "staged prebuilt protocore sha256=$got"
+          [ "$got" = "$EXPECTED_SHA256" ] || { echo "::error::prebuilt sha256 $got != expected $EXPECTED_SHA256"; exit 1; }
 
       - name: Stage artifacts
         id: stage

@@ -57,23 +57,24 @@ jobs:
           echo "commit=$commit"        >> "$GITHUB_OUTPUT"
           echo "short=$short"          >> "$GITHUB_OUTPUT"
 
-      # PREBUILT PUBLISH (v0.2.3-testnet): protocore binaries embed a build
+      # PREBUILT PUBLISH (v0.2.4-testnet): protocore binaries embed a build
       # timestamp (build.rs SystemTime::now), so a rebuild can never reproduce
-      # the cosigned binary the fleet will swap to. Instead of rebuilding
-      # a divergent sha, this release ingests the EXACT cassette binary B
-      # (sha256 8fcbaaa2…, mono-core ac155775 = #147 seat + #145 cassette + audit fixes #150/#152/#153) and
-      # cosigns + publishes those bytes — so download == fleet == the
-      # chain-registry binary_release_sha256 pin. (Generic build path retained
-      # on main for future, reproducible-build releases.)
+      # the cosigned binary the fleet runs. Instead of rebuilding a divergent
+      # sha, this release ingests the EXACT BIP-39 re-genesis fleet binary
+      # (sha256 c09638f0…, mono-core 862f6bc0 = BIP-39 -> ML-DSA-65 re-genesis,
+      # bespoke PQM-1 mnemonic format dropped per #161) and cosigns + publishes
+      # those bytes — so download == fleet == the chain-registry
+      # binary_release_sha256 pin. (Generic build path retained on main for
+      # future, reproducible-build releases.)
       - name: Stage the prebuilt cosigned fleet binary (skip rebuild)
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA256: 8fcbaaa2fd3b9d19cfab8a8e008a735c65ac74ed4fc8f1dc2de4061ac8abb787
+          EXPECTED_SHA256: c09638f024e52a88889d9cb8150920a78ff0256e49f95cae90f5771db966ace0
         run: |
           set -euo pipefail
           dest="src/target/${{ matrix.target }}/release"
           mkdir -p "$dest"
-          gh release download _prebuilt-staging-v023 -R monolythium/protocore \
+          gh release download _prebuilt-staging-v024 -R monolythium/protocore \
             --pattern protocore -O "$dest/protocore"
           chmod 0755 "$dest/protocore"
           got=$(sha256sum "$dest/protocore" | cut -d' ' -f1)

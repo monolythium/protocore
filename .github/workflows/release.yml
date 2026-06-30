@@ -57,24 +57,24 @@ jobs:
           echo "commit=$commit"        >> "$GITHUB_OUTPUT"
           echo "short=$short"          >> "$GITHUB_OUTPUT"
 
-      # PREBUILT PUBLISH (v0.2.4-testnet): protocore binaries embed a build
+      # PREBUILT PUBLISH (v0.3.0-testnet): protocore binaries embed a build
       # timestamp (build.rs SystemTime::now), so a rebuild can never reproduce
       # the cosigned binary the fleet runs. Instead of rebuilding a divergent
-      # sha, this release ingests the EXACT BIP-39 re-genesis fleet binary
-      # (sha256 c09638f0…, mono-core 862f6bc0 = BIP-39 -> ML-DSA-65 re-genesis,
-      # bespoke PQM-1 mnemonic format dropped per #161) and cosigns + publishes
-      # those bytes — so download == fleet == the chain-registry
+      # sha, this release ingests the EXACT v0.3.0 lifecycle-active re-genesis
+      # fleet binary (sha256 653347db…, mono-core 4d781ed9 = dynamic DVT cluster
+      # lifecycle active from genesis; FROST/DKG/BLS fully purged) and cosigns +
+      # publishes those bytes — so download == fleet == the chain-registry
       # binary_release_sha256 pin. (Generic build path retained on main for
       # future, reproducible-build releases.)
       - name: Stage the prebuilt cosigned fleet binary (skip rebuild)
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA256: c09638f024e52a88889d9cb8150920a78ff0256e49f95cae90f5771db966ace0
+          EXPECTED_SHA256: 653347dbdbcad29da8bc95ac3c0c97140171c8c55072add0da74fe3d7b3e17e5
         run: |
           set -euo pipefail
           dest="src/target/${{ matrix.target }}/release"
           mkdir -p "$dest"
-          gh release download _prebuilt-staging-v024 -R monolythium/protocore \
+          gh release download _prebuilt-staging-v030 -R monolythium/protocore \
             --pattern protocore -O "$dest/protocore"
           chmod 0755 "$dest/protocore"
           got=$(sha256sum "$dest/protocore" | cut -d' ' -f1)

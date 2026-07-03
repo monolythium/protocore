@@ -42,6 +42,8 @@ Releases `v0.1.47-testnet` and later are **cluster-charter capable**: `formClust
 
 Every release ships with everything you need to verify the binary came from this repo's build pipeline.
 
+Before an artifact is signed or published, the release workflow also **boot-smoke-tests the exact staged bytes**: it asserts the compile-time feature manifest (`protocore release info`) carries the full fleet feature set (`mdbx,indexer-postgres,mesh,sp1-bridge-verifier,sp1-verifier`), then boots the binary in full-node mode against the canonical [chain-registry](https://github.com/monolythium/chain-registry) genesis + milestones with a real Postgres and requires it to clear the runtime's fail-fast boot gates (AUD-0032 durable-indexer, AUD-0079 zkML backend, and siblings). A mis-built binary fails the release job instead of a live operator (`scripts/release-boot-smoke.sh`).
+
 ### SHA-256
 
 ```bash

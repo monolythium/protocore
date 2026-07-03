@@ -27,6 +27,24 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             asset_platform: x86_64-linux
 
+    # Postgres for the release-gate boot smoke test: the artifact must clear
+    # the AUD-0032 durable-indexer boot gate against a real Postgres before
+    # it can be cosigned/published.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: protocore
+          POSTGRES_PASSWORD: protocore
+          POSTGRES_DB: protocore_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U protocore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout protocore (release repo)
         uses: actions/checkout@v4
@@ -97,6 +115,54 @@ jobs:
           echo "asset=${asset}"        >> "$GITHUB_OUTPUT"
           echo "asset_path=out/${asset}" >> "$GITHUB_OUTPUT"
           echo "sha256=${sha}"         >> "$GITHUB_OUTPUT"
+
+      # Release gate (mono-core #157 + the 2026-07-02 v0.3.2 postmortem):
+      # execute the EXACT staged bytes before anything is cosigned or
+      # published. Phase 1 asserts the compile-time feature manifest
+      # (`protocore release info`, embedded via build.rs BUILD_FEATURES)
+      # contains every fleet feature — a build missing `sp1-verifier`
+      # (the v0.3.2 cutover incident: a release.yml feature edit dropped it
+      # and all 22 fleet nodes crash-looped on the AUD-0079 boot gate) or
+      # `indexer-postgres` (the 2026-06-27 lyth-val-1 crash-loop, AUD-0032)
+      # fails here. Phase 2 boots the artifact in full-node mode against the
+      # canonical chain-registry genesis + milestones with a real Postgres
+      # and requires it to clear the fail-fast boot gates and stay up.
+      #
+      # PREBUILT-INGEST NOTE: release/v*-prebuilt branches replace only the
+      # build step with a staged-binary download. Keep THIS step (and the
+      # job-level postgres service) intact on those branches — the gate must
+      # cover ingested binaries too; it runs on `work/protocore`, the same
+      # bytes both paths stage into the published tarball.
+      - name: Boot-smoke the staged artifact (release gate)
+        env:
+          SMOKE_REQUIRED_FEATURES: ${{ env.PROTOCORE_FEATURES }}
+          SMOKE_POSTGRES_URL: postgres://protocore:protocore@localhost:5432/protocore_smoke
+          SMOKE_TESTNET_MANIFEST_DIR: src/testnet
+          # Headroom over the script's 90s default: the gate must never
+          # false-fail a good release on runner/WAN slowness (worst case is
+          # an incident fix-forward, where a flaky gate invites bypassing
+          # it). The boot is seed-free (genesis resolve --no-write-peers),
+          # so a passing run exits the probe loop within seconds — the
+          # wide window costs nothing on success.
+          SMOKE_BOOT_PROBE_SECS: "300"
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # v0.3.2-testnet -> 0.3.2: the crate version the binary must
+          # self-report for this tag.
+          v="${TAG#v}"
+          v="${v%-testnet}"
+          v="${v%-mainnet}"
+          export SMOKE_EXPECT_VERSION="$v"
+          # chain-registry slug per channel. A mainnet tag requires the
+          # registry's mainnet entry to exist (currently reserved/TBD) —
+          # failing the resolve there is correct: a release that cannot
+          # boot against its network's canonical genesis must not ship.
+          case "${TAG}" in
+            *-mainnet) export SMOKE_REGISTRY_NETWORK="mainnet" ;;
+            *)         export SMOKE_REGISTRY_NETWORK="testnet-69420" ;;
+          esac
+          ./scripts/release-boot-smoke.sh work/protocore
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3

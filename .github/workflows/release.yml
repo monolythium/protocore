@@ -145,13 +145,6 @@ jobs:
           # so a passing run exits the probe loop within seconds — the
           # wide window costs nothing on success.
           SMOKE_BOOT_PROBE_SECS: "300"
-          # Testnet-transition override: the live chain-69420 genesis pins no
-          # milestone_digest yet, and post-#222 binaries hard-refuse a
-          # missing pin on public profiles. The smoke boots against the
-          # registry genesis, so it needs the documented break-glass env
-          # until the digest-pinned re-genesis lands in the chain-registry.
-          # REMOVE once the registry genesis carries milestone_digest.
-          PROTOCORE_ALLOW_UNPINNED_MILESTONES: "1"
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail

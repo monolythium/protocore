@@ -15,11 +15,11 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       # AUD-0079: public-profile chains (e.g. 69420) refuse to boot without the
-      # SP1 zkML verifier (runtime `enforce_production_zkml_backend`). The fleet
-      # binary ships BOTH `sp1-bridge-verifier` (bridge Groth16) and
-      # `sp1-verifier` (agent zkML); a release built without `sp1-verifier`
-      # crash-loops at boot. Keep both to match the fleet feature set.
-      PROTOCORE_FEATURES: mdbx,indexer-postgres,mesh,sp1-bridge-verifier,sp1-verifier
+      # SP1 zkML verifier (runtime `enforce_production_zkml_backend`). A release
+      # built without `sp1-verifier` crash-loops at boot, so it stays in the
+      # fleet feature set. The `sp1-bridge-verifier` feature was removed with the
+      # in-tree bridge stack — the interop route is an external provider now.
+      PROTOCORE_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
     strategy:
       fail-fast: true
       matrix:

@@ -138,6 +138,13 @@ jobs:
           SMOKE_REQUIRED_FEATURES: ${{ env.PROTOCORE_FEATURES }}
           SMOKE_POSTGRES_URL: postgres://protocore:protocore@localhost:5432/protocore_smoke
           SMOKE_TESTNET_MANIFEST_DIR: src/testnet
+          # Headroom over the script's 90s default: the gate must never
+          # false-fail a good release on runner/WAN slowness (worst case is
+          # an incident fix-forward, where a flaky gate invites bypassing
+          # it). The boot is seed-free (genesis resolve --no-write-peers),
+          # so a passing run exits the probe loop within seconds — the
+          # wide window costs nothing on success.
+          SMOKE_BOOT_PROBE_SECS: "300"
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail

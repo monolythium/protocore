@@ -169,7 +169,15 @@ resolve_args=(--registry-network "$REGISTRY_NETWORK")
 if [[ -n "${SMOKE_REGISTRY_URL:-}" ]]; then
   resolve_args+=(--registry-url "$SMOKE_REGISTRY_URL")
 fi
-"$BIN" --home "$home_dir" genesis resolve "${resolve_args[@]}" \
+# --no-write-peers: do NOT record the registry's fast-sync seed RPCs into
+# config.toml. With seeds recorded, a fresh node spends ~60-70s in the
+# pre-indexer fast-sync checkpoint retry loop (6 attempts x N seeds with
+# backoff — longer over WAN, or once the fleet serves real snapshots that
+# must download pre-indexer) before Node::start reaches the indexer spawn
+# that emits the gate-pass marker. The boot gates under test need no live
+# peers; with no seeds the boot falls through to genesis-forward
+# immediately, keeping the gate fast and independent of fleet health.
+"$BIN" --home "$home_dir" genesis resolve "${resolve_args[@]}" --no-write-peers \
   || fail "'protocore genesis resolve' failed — canonical genesis unavailable or hash mismatch"
 
 # Fetch the canonical milestone config when the registry entry pins one, so

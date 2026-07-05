@@ -2,7 +2,7 @@
 
 > Signed binary releases for **protocore** — the [Monolythium](https://monolythium.com) node binary. Source stays private until mainnet (see [why](#why-source-is-closed-for-now)); binaries are published here so testnet operators and ecosystem developers can run real nodes today.
 
-**Status:** **testnet binaries shipping** · 66 signed releases live (`v0.0.1-testnet` → [`v0.1.47-testnet`](https://github.com/monolythium/protocore/releases/latest), June 2026) · cosign + SBOM on every artifact · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
+**Status:** **testnet binaries shipping** · 99 signed releases live (`v0.0.1-testnet` → [`v0.3.4-testnet`](https://github.com/monolythium/protocore/releases/tag/v0.3.4-testnet), July 2026) · cosign + SBOM on every artifact · **License:** see [`LICENSE.md`](./LICENSE.md) (proprietary preview EULA — converts to BSL-1.1 at mainnet)
 
 ## Quick start for operators
 
@@ -42,23 +42,23 @@ Releases `v0.1.47-testnet` and later are **cluster-charter capable**: `formClust
 
 Every release ships with everything you need to verify the binary came from this repo's build pipeline.
 
-Before an artifact is signed or published, the release workflow also **boot-smoke-tests the exact staged bytes**: it asserts the compile-time feature manifest (`protocore release info`) carries the full fleet feature set (`mdbx,indexer-postgres,mesh,sp1-bridge-verifier,sp1-verifier`), then boots the binary in full-node mode against the canonical [chain-registry](https://github.com/monolythium/chain-registry) genesis + milestones with a real Postgres and requires it to clear the runtime's fail-fast boot gates (AUD-0032 durable-indexer, AUD-0079 zkML backend, and siblings). A mis-built binary fails the release job instead of a live operator (`scripts/release-boot-smoke.sh`).
+Before an artifact is signed or published, the release workflow also **boot-smoke-tests the exact staged bytes**: it asserts the compile-time feature manifest (`protocore release info`) carries the full fleet feature set (`mdbx,indexer-postgres,mesh,sp1-verifier`), then boots the binary in full-node mode against the canonical [chain-registry](https://github.com/monolythium/chain-registry) genesis + milestones with a real Postgres and requires it to clear the runtime's fail-fast boot gates (AUD-0032 durable-indexer, AUD-0079 zkML backend, and siblings). A mis-built binary fails the release job instead of a live operator (`scripts/release-boot-smoke.sh`).
 
 ### SHA-256
 
 ```bash
-sha256sum -c protocore-v0.1.47-testnet-x86_64-linux.tar.gz.sha256
+sha256sum -c protocore-v0.3.4-testnet-x86_64-linux.tar.gz.sha256
 ```
 
 ### Cosign keyless
 
 ```bash
 cosign verify-blob \
-  --certificate protocore-v0.1.47-testnet-x86_64-linux.tar.gz.pem \
-  --signature   protocore-v0.1.47-testnet-x86_64-linux.tar.gz.sig \
+  --certificate protocore-v0.3.4-testnet-x86_64-linux.tar.gz.pem \
+  --signature   protocore-v0.3.4-testnet-x86_64-linux.tar.gz.sig \
   --certificate-identity-regexp 'https://github.com/monolythium/protocore/.github/workflows/.+@refs/tags/v.+' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  protocore-v0.1.47-testnet-x86_64-linux.tar.gz
+  protocore-v0.3.4-testnet-x86_64-linux.tar.gz
 ```
 
 The certificate identity proves the artifact was produced by a workflow run on this repo, at a specific tag, under GitHub's OIDC issuer.
@@ -67,7 +67,7 @@ The certificate identity proves the artifact was produced by a workflow run on t
 
 ```bash
 # Inspect the SPDX SBOM
-cat protocore-v0.1.47-testnet-x86_64-linux.tar.gz.spdx.json | jq '.packages | length'
+cat protocore-v0.3.4-testnet-x86_64-linux.tar.gz.spdx.json | jq '.packages | length'
 ```
 
 ## How to use a binary

@@ -1,0 +1,462 @@
+# One-off Posture-C V15 exact-byte release preparation.
+#
+# This workflow is deliberately:
+#   * manual-only (never runs on a tag or branch push),
+#   * hard-pinned to one source tree and one already-frozen executable,
+#   * incapable of invoking cargo/rustc,
+#   * draft-only (it cannot publish the final release).
+#
+# Branch-ready target: release/v041-prebuilt
+# Final distribution tag: v0.4.1-testnet
+#
+# The generic release.yml remains the path for future source-built releases.
+
+name: release-v041-prebuilt-draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      chain_registry_commit:
+        description: "Full 40-hex commit containing the reviewed V15 registry candidate"
+        required: true
+        type: string
+      immutable_releases_enabled:
+        description: "I verified immutable releases are enabled before creating this final draft"
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: "Type v0.4.1-testnet/8bf6a99a to confirm this exact one-off cut"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-v041-prebuilt-draft
+  cancel-in-progress: false
+
+jobs:
+  stage-sign-draft:
+    name: verify, boot-smoke, sign, and stage immutable draft
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: v0.4.1-testnet
+      STAGING_RELEASE: _prebuilt-staging-v041
+      MONO_CORE_COMMIT: 6d3ab40b8c3d0680242526bc0cb9d221e1055694
+      MONO_CORE_TREE: f53463b7f4ea3f56066ee850b8481574e9f98b8a
+      MONO_CORE_CARGO_LOCK_SHA256: a3c86ea26b02c71526f7fca120f128084ddf8e5354ebe454c02c8ef31e546ed7
+      BINARY_SHA256: 8bf6a99a727947b57f25eb15c1fbb5223cfc932659f4ff11fb0da37d0294f153
+      EXPECTED_TARBALL_SHA256: c07cae5170221b833dbaebf1cb823767462e52162f21fa615851dcae8609941c
+      BINARY_VERSION: 0.4.0
+      BINARY_BUILD_TIMESTAMP_UTC: "1784909426"
+      BINARY_RUSTC: "rustc 1.93.0 (254b59607 2026-01-19)"
+      BINARY_TARGET: x86_64-unknown-linux-gnu
+      BINARY_PROFILE: release
+      BINARY_FEATURES: default,indexer-postgres,mdbx,mesh,sp1-verifier
+      PROTOCORE_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
+      CLIENT_VERSION: protocore/v2/v0.4.0-testnet-42-g6d3ab40b+6d3ab40b
+      CHAIN_ID: "69420"
+      GENESIS_HASH: 0xbf09dc062e1a3ce71e4fbe5833d1ebe546cce5c9dcbd4de3ee0c693690661666
+      GENESIS_SHA256: c94e8f7bf54211610838f62b2bd7192af00664ba409e81b77f360b518fb14283
+      MILESTONES_SHA256: 03dec827fb6e93c4f3e8ddf9d48b32bc0545b52cee4aa712f90ace6934da683b
+      ASSET_PLATFORM: x86_64-linux
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: protocore
+          POSTGRES_PASSWORD: protocore
+          POSTGRES_DB: protocore_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U protocore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Preflight the manual one-off inputs
+        env:
+          CHAIN_REGISTRY_COMMIT: ${{ inputs.chain_registry_commit }}
+          IMMUTABLE_RELEASES_ENABLED: ${{ inputs.immutable_releases_enabled }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/release/v041-prebuilt" ]] || {
+            echo "::error::Run this one-off only from release/v041-prebuilt"
+            exit 1
+          }
+          [[ "$CHAIN_REGISTRY_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::chain_registry_commit must be a full lowercase 40-hex commit"
+            exit 1
+          }
+          [[ "$IMMUTABLE_RELEASES_ENABLED" == "true" ]] || {
+            echo "::error::Enable immutable releases before creating the final draft"
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "v0.4.1-testnet/8bf6a99a" ]] || {
+            echo "::error::Exact-cut confirmation did not match"
+            exit 1
+          }
+
+      - name: Checkout protocore release repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Refuse an existing tag or published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${RELEASE_TAG} already exists; refusing to move or reuse it"
+            exit 1
+          fi
+          release_rows="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              | jq -s --arg tag "$RELEASE_TAG" \
+                  '[.[][] | select(.tag_name == $tag) | {id, draft, prerelease}]'
+          )"
+          count="$(jq 'length' <<<"$release_rows")"
+          [[ "$count" -le 1 ]] || {
+            echo "::error::Multiple releases unexpectedly use ${RELEASE_TAG}"
+            exit 1
+          }
+          if [[ "$count" == 1 ]]; then
+            jq -e '.[0].draft == true' <<<"$release_rows" >/dev/null || {
+              echo "::error::A non-draft ${RELEASE_TAG} release already exists"
+              exit 1
+            }
+            echo "Existing ${RELEASE_TAG} draft found; verified rerun may replace draft assets."
+          fi
+
+      - name: Mint read-only GitHub App token for exact mono-core source
+        id: app_token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.MONO_CORE_READ_APP_ID }}
+          private-key: ${{ secrets.MONO_CORE_READ_APP_PRIVATE_KEY }}
+          owner: monolythium
+          repositories: mono-core
+          permission-contents: read
+
+      - name: Checkout frozen mono-core source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: monolythium/mono-core
+          token: ${{ steps.app_token.outputs.token }}
+          path: src
+          ref: 6d3ab40b8c3d0680242526bc0cb9d221e1055694
+          fetch-depth: 1
+
+      - name: Verify frozen source identity and local testnet manifests
+        id: source
+        working-directory: src
+        run: |
+          set -euo pipefail
+          actual_commit="$(git rev-parse HEAD)"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          cargo_lock_sha="$(sha256sum Cargo.lock | awk '{print $1}')"
+          [[ "$actual_commit" == "$MONO_CORE_COMMIT" ]]
+          [[ "$actual_tree" == "$MONO_CORE_TREE" ]]
+          [[ "$cargo_lock_sha" == "$MONO_CORE_CARGO_LOCK_SHA256" ]]
+          [[ -d testnet ]]
+          manifest_out="${GITHUB_WORKSPACE}/testnet-manifests-${RELEASE_TAG}.sha256"
+          find testnet -maxdepth 1 -type f -print0 \
+            | sort -z \
+            | xargs -0 -r sha256sum >"$manifest_out"
+          manifest_inventory_sha="$(sha256sum "$manifest_out" | awk '{print $1}')"
+          echo "manifest_path=$manifest_out" >>"$GITHUB_OUTPUT"
+          echo "manifest_inventory_sha256=$manifest_inventory_sha" >>"$GITHUB_OUTPUT"
+
+      - name: Checkout commit-pinned V15 chain-registry candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: monolythium/chain-registry
+          path: registry
+          ref: ${{ inputs.chain_registry_commit }}
+          fetch-depth: 1
+
+      - name: Verify V15 registry candidate and canonical bytes
+        id: registry
+        env:
+          CHAIN_REGISTRY_COMMIT: ${{ inputs.chain_registry_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$(git -C registry rev-parse HEAD)" == "$CHAIN_REGISTRY_COMMIT" ]]
+          entry="registry/chains/testnet-69420.toml"
+          genesis="registry/chains/genesis/testnet-69420.genesis.toml"
+          milestones="registry/chains/milestones/testnet-69420.milestones.toml"
+          [[ "$(sha256sum "$genesis" | awk '{print $1}')" == "$GENESIS_SHA256" ]]
+          [[ "$(sha256sum "$milestones" | awk '{print $1}')" == "$MILESTONES_SHA256" ]]
+          grep -Eq "^chain_id[[:space:]]*=[[:space:]]*${CHAIN_ID}$" "$entry"
+          grep -Eq "^genesis_hash[[:space:]]*=[[:space:]]*\"${GENESIS_HASH}\"$" "$entry"
+          grep -Eq "^genesis_sha256[[:space:]]*=[[:space:]]*\"${GENESIS_SHA256}\"$" "$entry"
+          grep -Eq "^milestones_sha256[[:space:]]*=[[:space:]]*\"${MILESTONES_SHA256}\"$" "$entry"
+          grep -Eq "^binary_sha[[:space:]]*=[[:space:]]*\"${MONO_CORE_COMMIT}\"$" "$entry"
+          grep -Eq "^binary_release_sha256[[:space:]]*=[[:space:]]*\"${BINARY_SHA256}\"$" "$entry"
+          grep -Eq "^release_tag[[:space:]]*=[[:space:]]*\"${RELEASE_TAG}\"$" "$entry"
+          if grep -Eq '^[[:space:]]*release_tarball_sha256[[:space:]]*=' "$entry"; then
+            echo "::error::Candidate must not invent a tarball digest before this workflow creates it"
+            exit 1
+          fi
+          npm --prefix registry ci --ignore-scripts
+          npm --prefix registry run validate
+          echo "commit=$CHAIN_REGISTRY_COMMIT" >>"$GITHUB_OUTPUT"
+
+      - name: Verify private staging draft and ingest exact executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          staging="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              | jq -s --arg tag "$STAGING_RELEASE" \
+                  '[.[][] | select(.tag_name == $tag)]'
+          )"
+          [[ "$(jq 'length' <<<"$staging")" == 1 ]] || {
+            echo "::error::Expected exactly one ${STAGING_RELEASE} draft"
+            exit 1
+          }
+          jq -e '.[0].draft == true' <<<"$staging" >/dev/null || {
+            echo "::error::Prebuilt staging release must remain a private draft"
+            exit 1
+          }
+          jq -e '
+            (.[0].assets | length) == 1 and
+            ([.[0].assets[] | select(.name == "protocore")] | length) == 1
+          ' <<<"$staging" >/dev/null || {
+            echo "::error::Staging draft must contain only one asset, named protocore"
+            exit 1
+          }
+          mkdir -p ingest
+          gh release download "$STAGING_RELEASE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern protocore \
+            --output ingest/protocore
+          chmod 0755 ingest/protocore
+          [[ "$(sha256sum ingest/protocore | awk '{print $1}')" == "$BINARY_SHA256" ]]
+
+      - name: Verify provenance and deterministically package exact bytes
+        id: stage
+        run: |
+          set -euo pipefail
+          scripts/release-v041-prebuilt-stage.sh ingest/protocore "$GITHUB_WORKSPACE"
+
+      - name: Boot-smoke exact bytes against local V15 inputs
+        env:
+          SMOKE_REQUIRED_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
+          SMOKE_EXPECT_VERSION: "0.4.0"
+          SMOKE_POSTGRES_URL: postgres://protocore:protocore@127.0.0.1:5432/protocore_smoke
+          SMOKE_TESTNET_MANIFEST_DIR: src/testnet
+          SMOKE_REGISTRY_NETWORK: testnet-69420
+          SMOKE_BOOT_PROBE_SECS: "300"
+        run: |
+          set -euo pipefail
+          smoke_root="$RUNNER_TEMP/v15-registry"
+          smoke_chains="$smoke_root/chains"
+          rm -rf "$smoke_root"
+          mkdir -p "$smoke_chains/genesis" "$smoke_chains/milestones"
+          cp registry/chains/testnet-69420.toml "$smoke_chains/"
+          cp registry/chains/genesis/testnet-69420.genesis.toml "$smoke_chains/genesis/"
+          cp registry/chains/milestones/testnet-69420.milestones.toml "$smoke_chains/milestones/"
+
+          port=18080
+          base="http://127.0.0.1:${port}"
+          entry="$smoke_chains/testnet-69420.toml"
+          sed -i \
+            -e "s|^genesis_url[[:space:]]*=.*|genesis_url    = \"${base}/genesis/testnet-69420.genesis.toml\"|" \
+            -e "s|^milestones_url[[:space:]]*=.*|milestones_url    = \"${base}/milestones/testnet-69420.milestones.toml\"|" \
+            "$entry"
+
+          python3 -m http.server "$port" \
+            --bind 127.0.0.1 \
+            --directory "$smoke_chains" \
+            >"$RUNNER_TEMP/v15-registry-http.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 20); do
+            curl -fsS "${base}/testnet-69420.toml" >/dev/null && break
+            sleep 0.25
+          done
+          curl -fsS "${base}/testnet-69420.toml" >/dev/null
+
+          export SMOKE_REGISTRY_URL="$base"
+          scripts/release-boot-smoke.sh "${{ steps.stage.outputs.binary_path }}"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign deterministic tarball with GitHub OIDC
+        env:
+          ASSET: ${{ steps.stage.outputs.asset_path }}
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature "${ASSET}.sig" \
+            --output-certificate "${ASSET}.pem" \
+            "$ASSET"
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          file: ${{ steps.stage.outputs.asset_path }}
+          format: spdx-json
+          output-file: ${{ steps.stage.outputs.asset_path }}.spdx.json
+
+      - name: Write dual-identity release metadata
+        env:
+          ASSET: ${{ steps.stage.outputs.asset }}
+          TARBALL_SHA256: ${{ steps.stage.outputs.tarball_sha256 }}
+          RELEASE_INFO_ASSET: ${{ steps.stage.outputs.release_info_path }}
+          MANIFEST_INVENTORY_SHA256: ${{ steps.source.outputs.manifest_inventory_sha256 }}
+          CHAIN_REGISTRY_COMMIT: ${{ steps.registry.outputs.commit }}
+        run: |
+          set -euo pipefail
+          metadata="out/release-${RELEASE_TAG}.json"
+          release_info_name="$(basename "$RELEASE_INFO_ASSET")"
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg asset "$ASSET" \
+            --arg platform "$ASSET_PLATFORM" \
+            --arg tarball_sha256 "$TARBALL_SHA256" \
+            --arg binary_sha256 "$BINARY_SHA256" \
+            --arg binary_version "$BINARY_VERSION" \
+            --arg build_timestamp_utc "$BINARY_BUILD_TIMESTAMP_UTC" \
+            --arg rustc "$BINARY_RUSTC" \
+            --arg target "$BINARY_TARGET" \
+            --arg profile "$BINARY_PROFILE" \
+            --arg features "$BINARY_FEATURES" \
+            --arg client_version "$CLIENT_VERSION" \
+            --arg source_commit "$MONO_CORE_COMMIT" \
+            --arg source_tree "$MONO_CORE_TREE" \
+            --arg cargo_lock_sha256 "$MONO_CORE_CARGO_LOCK_SHA256" \
+            --arg chain_registry_commit "$CHAIN_REGISTRY_COMMIT" \
+            --arg chain_id "$CHAIN_ID" \
+            --arg genesis_hash "$GENESIS_HASH" \
+            --arg genesis_sha256 "$GENESIS_SHA256" \
+            --arg milestones_sha256 "$MILESTONES_SHA256" \
+            --arg manifest_inventory_sha256 "$MANIFEST_INVENTORY_SHA256" \
+            --arg staging_release "$STAGING_RELEASE" \
+            --arg workflow_commit "$GITHUB_SHA" \
+            --arg release_info "$release_info_name" \
+            '{
+              schemaVersion: 2,
+              tag: $tag,
+              channel: "testnet",
+              distribution: {
+                release_tag: $tag,
+                binary_version: $binary_version,
+                embedded_release_tag: null,
+                client_version: $client_version,
+                alias_policy: "exact tuple: release tag + source commit + extracted binary sha256"
+              },
+              source: {
+                repository: "monolythium/mono-core",
+                commit: $source_commit,
+                tree: $source_tree,
+                cargo_lock_sha256: $cargo_lock_sha256
+              },
+              build: {
+                build_timestamp_utc: ($build_timestamp_utc | tonumber),
+                rustc: $rustc,
+                target: $target,
+                profile: $profile,
+                features: ($features | split(","))
+              },
+              chain: {
+                chain_id: ($chain_id | tonumber),
+                genesis_hash: $genesis_hash,
+                genesis_sha256: $genesis_sha256,
+                milestones_sha256: $milestones_sha256,
+                chain_registry_commit: $chain_registry_commit,
+                testnet_manifest_inventory_sha256: $manifest_inventory_sha256
+              },
+              platforms: {
+                ($platform): {
+                  asset: $asset,
+                  tarball_sha256: $tarball_sha256,
+                  extracted_binary_sha256: $binary_sha256,
+                  binary_digest: ("protocore-" + $tag + "-" + $platform + ".binary.sha256"),
+                  release_info: $release_info,
+                  signature: ($asset + ".sig"),
+                  certificate: ($asset + ".pem"),
+                  sbom: ($asset + ".spdx.json")
+                }
+              },
+              provenance: {
+                mode: "prebuilt-ingest",
+                staging_release: $staging_release,
+                workflow_commit: $workflow_commit,
+                rebuilt: false
+              },
+              publication: {
+                draft_only: true,
+                immutable_release_required: true,
+                attestation_bundle_required_before_publish: true
+              }
+            }' >"$metadata"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --arg binary_sha "$BINARY_SHA256" \
+            --arg tar_sha "$TARBALL_SHA256" \
+            '
+              .tag == $tag and
+              .distribution.binary_version == "0.4.0" and
+              .distribution.embedded_release_tag == null and
+              .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
+              .platforms["x86_64-linux"].tarball_sha256 == $tar_sha and
+              .publication.draft_only == true
+            ' "$metadata" >/dev/null
+          [[ "$TARBALL_SHA256" == "$EXPECTED_TARBALL_SHA256" ]]
+
+      - name: Create or update final release as DRAFT ONLY
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: v0.4.1-testnet
+          target_commitish: ${{ github.sha }}
+          name: v0.4.1-testnet
+          draft: true
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          body: |
+            Posture-C V15 exact-byte testnet distribution draft.
+
+            DO NOT PUBLISH until the independent mono-core ML-DSA attestation
+            bundle has been attached and every draft asset has been downloaded
+            and reverified. The distribution tag is v0.4.1-testnet; the frozen
+            executable truthfully reports binary version 0.4.0.
+          files: |
+            ${{ steps.stage.outputs.asset_path }}
+            ${{ steps.stage.outputs.tarball_digest_path }}
+            ${{ steps.stage.outputs.binary_digest_path }}
+            ${{ steps.stage.outputs.release_info_path }}
+            ${{ steps.stage.outputs.asset_path }}.sig
+            ${{ steps.stage.outputs.asset_path }}.pem
+            ${{ steps.stage.outputs.asset_path }}.spdx.json
+            ${{ steps.source.outputs.manifest_path }}
+            out/release-v0.4.1-testnet.json
+
+      - name: Prove this workflow did not publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              | jq -s --arg tag "$RELEASE_TAG" \
+                  '[.[][] | select(.tag_name == $tag)]'
+          )"
+          [[ "$(jq 'length' <<<"$release")" == 1 ]]
+          jq -e '.[0].draft == true and .[0].prerelease == true' <<<"$release" >/dev/null
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "::error::Draft preparation unexpectedly created a Git tag"
+            exit 1
+          fi
+          echo "PASS: ${RELEASE_TAG} remains a draft; no release tag was created."

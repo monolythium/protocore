@@ -4,7 +4,8 @@
 #   * manual-only (never runs on a tag or branch push),
 #   * hard-pinned to one source tree and one already-frozen executable,
 #   * incapable of invoking cargo/rustc,
-#   * draft-only (it cannot publish the final release).
+#   * limited to either a temporary public attestation prerelease or a final
+#     draft (it cannot publish the final release).
 #
 # Branch-ready target: release/v041-prebuilt
 # Final distribution tag: v0.4.1-testnet
@@ -20,13 +21,21 @@ on:
         description: "Full 40-hex commit containing the reviewed V15 registry candidate"
         required: true
         type: string
+      publication_mode:
+        description: "Create the temporary attestation prerelease or the final immutable-ready draft"
+        required: true
+        default: attestation-staging
+        type: choice
+        options:
+          - attestation-staging
+          - final-draft
       immutable_releases_enabled:
-        description: "I verified immutable releases are enabled before creating this final draft"
+        description: "Must match the repository state: false for staging, true for the final draft"
         required: true
         default: false
         type: boolean
       confirmation:
-        description: "Type v0.4.1-testnet/8bf6a99a to confirm this exact one-off cut"
+        description: "Type the selected mode followed by /8bf6a99a"
         required: true
         type: string
 
@@ -39,13 +48,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  stage-sign-draft:
-    name: verify, boot-smoke, sign, and stage immutable draft
+  stage-sign-release:
+    name: verify, boot-smoke, sign, and stage exact bytes
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
       RELEASE_TAG: v0.4.1-testnet
       STAGING_RELEASE: _prebuilt-staging-v041
+      ATTESTATION_STAGING_TAG: v0.4.1-testnet-attestation-staging
       MONO_CORE_COMMIT: 6d3ab40b8c3d0680242526bc0cb9d221e1055694
       MONO_CORE_TREE: f53463b7f4ea3f56066ee850b8481574e9f98b8a
       MONO_CORE_CARGO_LOCK_SHA256: a3c86ea26b02c71526f7fca120f128084ddf8e5354ebe454c02c8ef31e546ed7
@@ -84,6 +94,7 @@ jobs:
       - name: Preflight the manual one-off inputs
         env:
           CHAIN_REGISTRY_COMMIT: ${{ inputs.chain_registry_commit }}
+          PUBLICATION_MODE: ${{ inputs.publication_mode }}
           IMMUTABLE_RELEASES_ENABLED: ${{ inputs.immutable_releases_enabled }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
@@ -96,11 +107,27 @@ jobs:
             echo "::error::chain_registry_commit must be a full lowercase 40-hex commit"
             exit 1
           }
-          [[ "$IMMUTABLE_RELEASES_ENABLED" == "true" ]] || {
-            echo "::error::Enable immutable releases before creating the final draft"
-            exit 1
-          }
-          [[ "$CONFIRMATION" == "v0.4.1-testnet/8bf6a99a" ]] || {
+          case "$PUBLICATION_MODE" in
+            attestation-staging)
+              [[ "$IMMUTABLE_RELEASES_ENABLED" == "false" ]] || {
+                echo "::error::Operator must verify immutable releases remain disabled for temporary staging"
+                exit 1
+              }
+              expected_confirmation="attestation-staging/8bf6a99a"
+              ;;
+            final-draft)
+              [[ "$IMMUTABLE_RELEASES_ENABLED" == "true" ]] || {
+                echo "::error::Operator must verify immutable releases are enabled before the final draft"
+                exit 1
+              }
+              expected_confirmation="final-draft/8bf6a99a"
+              ;;
+            *)
+              echo "::error::Unknown publication mode"
+              exit 1
+              ;;
+          esac
+          [[ "$CONFIRMATION" == "$expected_confirmation" ]] || {
             echo "::error::Exact-cut confirmation did not match"
             exit 1
           }
@@ -108,32 +135,60 @@ jobs:
       - name: Checkout protocore release repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Refuse an existing tag or published release
+      - name: Refuse conflicting release state
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLICATION_MODE: ${{ inputs.publication_mode }}
         run: |
           set -euo pipefail
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "::error::Tag ${RELEASE_TAG} already exists; refusing to move or reuse it"
+          if [[ "$PUBLICATION_MODE" == "attestation-staging" ]]; then
+            target_tag="$ATTESTATION_STAGING_TAG"
+          else
+            target_tag="$RELEASE_TAG"
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${target_tag}" >/dev/null 2>&1; then
+            echo "::error::Tag ${target_tag} already exists; refusing to move or reuse it"
             exit 1
           fi
           release_rows="$(
             gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
-              | jq -s --arg tag "$RELEASE_TAG" \
+              | jq -s --arg tag "$target_tag" \
                   '[.[][] | select(.tag_name == $tag) | {id, draft, prerelease}]'
           )"
           count="$(jq 'length' <<<"$release_rows")"
           [[ "$count" -le 1 ]] || {
-            echo "::error::Multiple releases unexpectedly use ${RELEASE_TAG}"
+            echo "::error::Multiple releases unexpectedly use ${target_tag}"
             exit 1
           }
           if [[ "$count" == 1 ]]; then
-            jq -e '.[0].draft == true' <<<"$release_rows" >/dev/null || {
-              echo "::error::A non-draft ${RELEASE_TAG} release already exists"
+            [[ "$PUBLICATION_MODE" == "final-draft" ]] || {
+              echo "::error::Temporary staging already exists; run the exact cleanup workflow first"
               exit 1
             }
-            echo "Existing ${RELEASE_TAG} draft found; verified rerun may replace draft assets."
+            jq -e '.[0].draft == true' <<<"$release_rows" >/dev/null || {
+              echo "::error::A non-draft ${target_tag} release already exists"
+              exit 1
+            }
+            echo "Existing ${target_tag} draft found; verified rerun may replace draft assets."
           fi
+          if [[ "$PUBLICATION_MODE" == "attestation-staging" ]]; then
+            conflicting_tag="$RELEASE_TAG"
+          else
+            conflicting_tag="$ATTESTATION_STAGING_TAG"
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${conflicting_tag}" >/dev/null 2>&1; then
+            echo "::error::Conflicting tag ${conflicting_tag} exists; required release order was not preserved"
+            exit 1
+          fi
+          conflicting_releases="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              | jq -s --arg tag "$conflicting_tag" \
+                  '[.[][] | select(.tag_name == $tag)] | length'
+          )"
+          [[ "$conflicting_releases" == "0" ]] || {
+            echo "::error::Conflicting ${conflicting_tag} release exists; required release order was not preserved"
+            exit 1
+          }
 
       - name: Mint read-only GitHub App token for exact mono-core source
         id: app_token
@@ -316,6 +371,7 @@ jobs:
           RELEASE_INFO_ASSET: ${{ steps.stage.outputs.release_info_path }}
           MANIFEST_INVENTORY_SHA256: ${{ steps.source.outputs.manifest_inventory_sha256 }}
           CHAIN_REGISTRY_COMMIT: ${{ steps.registry.outputs.commit }}
+          PUBLICATION_MODE: ${{ inputs.publication_mode }}
         run: |
           set -euo pipefail
           metadata="out/release-${RELEASE_TAG}.json"
@@ -343,6 +399,8 @@ jobs:
             --arg milestones_sha256 "$MILESTONES_SHA256" \
             --arg manifest_inventory_sha256 "$MANIFEST_INVENTORY_SHA256" \
             --arg staging_release "$STAGING_RELEASE" \
+            --arg attestation_staging_tag "$ATTESTATION_STAGING_TAG" \
+            --arg publication_mode "$PUBLICATION_MODE" \
             --arg workflow_commit "$GITHUB_SHA" \
             --arg release_info "$release_info_name" \
             '{
@@ -396,7 +454,15 @@ jobs:
                 rebuilt: false
               },
               publication: {
-                draft_only: true,
+                carrier_mode: $publication_mode,
+                carrier_tag: (
+                  if $publication_mode == "attestation-staging"
+                  then $attestation_staging_tag
+                  else $tag
+                  end
+                ),
+                temporary_attestation_staging: ($publication_mode == "attestation-staging"),
+                draft_only: ($publication_mode == "final-draft"),
                 immutable_release_required: true,
                 attestation_bundle_required_before_publish: true
               }
@@ -405,17 +471,51 @@ jobs:
             --arg tag "$RELEASE_TAG" \
             --arg binary_sha "$BINARY_SHA256" \
             --arg tar_sha "$TARBALL_SHA256" \
+            --arg publication_mode "$PUBLICATION_MODE" \
             '
               .tag == $tag and
               .distribution.binary_version == "0.4.0" and
               .distribution.embedded_release_tag == null and
               .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
               .platforms["x86_64-linux"].tarball_sha256 == $tar_sha and
-              .publication.draft_only == true
+              .publication.carrier_mode == $publication_mode and
+              .publication.temporary_attestation_staging ==
+                ($publication_mode == "attestation-staging") and
+              .publication.draft_only == ($publication_mode == "final-draft")
             ' "$metadata" >/dev/null
           [[ "$TARBALL_SHA256" == "$EXPECTED_TARBALL_SHA256" ]]
 
+      - name: Create temporary public attestation prerelease
+        if: ${{ inputs.publication_mode == 'attestation-staging' }}
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: v0.4.1-testnet-attestation-staging
+          target_commitish: ${{ github.sha }}
+          name: v0.4.1-testnet attestation staging
+          draft: false
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          body: |
+            TEMPORARY PUBLIC ATTESTATION STAGING — NOT A DISTRIBUTION RELEASE.
+
+            These checksum-locked assets exist only so mono-core can attest the
+            exact frozen V15 bytes without a cross-repository credential. Delete
+            this prerelease and its tag after capturing the attestation artifact,
+            then enable immutable releases before creating the final draft.
+          files: |
+            ${{ steps.stage.outputs.asset_path }}
+            ${{ steps.stage.outputs.tarball_digest_path }}
+            ${{ steps.stage.outputs.binary_digest_path }}
+            ${{ steps.stage.outputs.release_info_path }}
+            ${{ steps.stage.outputs.asset_path }}.sig
+            ${{ steps.stage.outputs.asset_path }}.pem
+            ${{ steps.stage.outputs.asset_path }}.spdx.json
+            ${{ steps.source.outputs.manifest_path }}
+            out/release-v0.4.1-testnet.json
+
       - name: Create or update final release as DRAFT ONLY
+        if: ${{ inputs.publication_mode == 'final-draft' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v0.4.1-testnet
@@ -443,7 +543,56 @@ jobs:
             ${{ steps.source.outputs.manifest_path }}
             out/release-v0.4.1-testnet.json
 
-      - name: Prove this workflow did not publish
+      - name: Prove exact temporary attestation staging
+        if: ${{ inputs.publication_mode == 'attestation-staging' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              | jq -s --arg tag "$ATTESTATION_STAGING_TAG" \
+                  '[.[][] | select(.tag_name == $tag)]'
+          )"
+          [[ "$(jq 'length' <<<"$release")" == 1 ]]
+          jq -e \
+            --arg commit "$GITHUB_SHA" \
+            '
+              .[0].draft == false and
+              .[0].prerelease == true and
+              .[0].target_commitish == $commit
+            ' <<<"$release" >/dev/null
+          required_assets="$(
+            jq -nc --arg asset "protocore-${RELEASE_TAG}-${ASSET_PLATFORM}.tar.gz" '
+              [
+                $asset,
+                ($asset + ".sha256"),
+                "protocore-v0.4.1-testnet-x86_64-linux.binary.sha256",
+                "protocore-v0.4.1-testnet-x86_64-linux.release-info.json",
+                ($asset + ".sig"),
+                ($asset + ".pem"),
+                ($asset + ".spdx.json"),
+                "testnet-manifests-v0.4.1-testnet.sha256",
+                "release-v0.4.1-testnet.json"
+              ] | sort
+            '
+          )"
+          actual_assets="$(jq -c '.[0].assets | map(.name) | sort' <<<"$release")"
+          [[ "$actual_assets" == "$required_assets" ]] || {
+            echo "::error::Temporary staging asset set is not exact"
+            exit 1
+          }
+          ref="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${ATTESTATION_STAGING_TAG}"
+          )"
+          jq -e \
+            --arg commit "$GITHUB_SHA" \
+            '.object.type == "commit" and .object.sha == $commit' \
+            <<<"$ref" >/dev/null
+          echo "PASS: exact temporary attestation prerelease is public and checksum-locked."
+
+      - name: Prove final release remains a draft
+        if: ${{ inputs.publication_mode == 'final-draft' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

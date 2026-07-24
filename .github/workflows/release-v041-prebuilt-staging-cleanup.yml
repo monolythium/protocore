@@ -1,0 +1,209 @@
+# One-off cleanup for the temporary public Posture-C V15 attestation staging
+# release. It validates the exact release, assets, archive, and extracted binary
+# before deleting only that release ID and its exact tag. It cannot touch the
+# final v0.4.1-testnet draft or tag.
+
+name: release-v041-prebuilt-staging-cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_release_id:
+        description: "Numeric release ID for v0.4.1-testnet-attestation-staging"
+        required: true
+        type: string
+      captured_attestation_sha256:
+        description: "SHA-256 of the locally captured mono-core Actions artifact archive"
+        required: true
+        type: string
+      immutable_releases_enabled:
+        description: "Must remain false until this temporary release and tag are deleted"
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: "Type delete-v041-attestation-staging/8bf6a99a"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-v041-prebuilt-draft
+  cancel-in-progress: false
+
+jobs:
+  verify-and-delete:
+    name: verify exact staging bytes, then delete release and tag
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    env:
+      STAGING_TAG: v0.4.1-testnet-attestation-staging
+      RELEASE_ASSET: protocore-v0.4.1-testnet-x86_64-linux.tar.gz
+      EXPECTED_TARBALL_SHA256: c07cae5170221b833dbaebf1cb823767462e52162f21fa615851dcae8609941c
+      EXPECTED_BINARY_SHA256: 8bf6a99a727947b57f25eb15c1fbb5223cfc932659f4ff11fb0da37d0294f153
+
+    steps:
+      - name: Preflight exact cleanup target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RELEASE_ID: ${{ inputs.staging_release_id }}
+          CAPTURED_ATTESTATION_SHA256: ${{ inputs.captured_attestation_sha256 }}
+          IMMUTABLE_RELEASES_ENABLED: ${{ inputs.immutable_releases_enabled }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/release/v041-prebuilt" ]] || {
+            echo "::error::Run this cleanup only from release/v041-prebuilt"
+            exit 1
+          }
+          [[ "$STAGING_RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::staging_release_id must be numeric"
+            exit 1
+          }
+          [[ "$CAPTURED_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::A lowercase SHA-256 of the captured attestation artifact is required"
+            exit 1
+          }
+          [[ "$CONFIRMATION" == "delete-v041-attestation-staging/8bf6a99a" ]] || {
+            echo "::error::Exact cleanup confirmation did not match"
+            exit 1
+          }
+          [[ "$IMMUTABLE_RELEASES_ENABLED" == "false" ]] || {
+            echo "::error::Operator must verify immutable releases remain disabled through cleanup"
+            exit 1
+          }
+          {
+            echo "### Captured attestation"
+            echo
+            echo "Actions artifact archive SHA-256: \`${CAPTURED_ATTESTATION_SHA256}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Validate exact public staging release and assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RELEASE_ID: ${{ inputs.staging_release_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          release_json="verify/staging-release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${STAGING_RELEASE_ID}" >"$release_json"
+          jq -e \
+            --arg tag "$STAGING_TAG" \
+            '
+              .tag_name == $tag and
+              .draft == false and
+              .prerelease == true and
+              (.target_commitish | test("^[0-9a-f]{40}$"))
+            ' "$release_json" >/dev/null
+          target_commitish="$(jq -r '.target_commitish' "$release_json")"
+          ref="$(
+            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${STAGING_TAG}"
+          )"
+          jq -e \
+            --arg commit "$target_commitish" \
+            '.object.type == "commit" and .object.sha == $commit' \
+            <<<"$ref" >/dev/null
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v0.4.1-testnet" >/dev/null 2>&1; then
+            echo "::error::Final distribution tag exists before temporary staging cleanup"
+            exit 1
+          fi
+          final_release_count="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              | jq -s '[.[][] | select(.tag_name == "v0.4.1-testnet")] | length'
+          )"
+          [[ "$final_release_count" == "0" ]] || {
+            echo "::error::Final distribution draft/release exists before temporary staging cleanup"
+            exit 1
+          }
+          required_assets="$(
+            jq -nc --arg asset "$RELEASE_ASSET" '
+              [
+                $asset,
+                ($asset + ".sha256"),
+                "protocore-v0.4.1-testnet-x86_64-linux.binary.sha256",
+                "protocore-v0.4.1-testnet-x86_64-linux.release-info.json",
+                ($asset + ".sig"),
+                ($asset + ".pem"),
+                ($asset + ".spdx.json"),
+                "testnet-manifests-v0.4.1-testnet.sha256",
+                "release-v0.4.1-testnet.json"
+              ] | sort
+            '
+          )"
+          actual_assets="$(jq -c '.assets | map(.name) | sort' "$release_json")"
+          [[ "$actual_assets" == "$required_assets" ]] || {
+            echo "::error::Cleanup target asset set is not exact"
+            exit 1
+          }
+          gh release download "$STAGING_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$RELEASE_ASSET" \
+            --pattern "${RELEASE_ASSET}.sha256" \
+            --pattern "protocore-v0.4.1-testnet-x86_64-linux.binary.sha256" \
+            --pattern "release-v0.4.1-testnet.json" \
+            --dir verify
+          [[ "$(sha256sum "verify/$RELEASE_ASSET" | awk '{print $1}')" == "$EXPECTED_TARBALL_SHA256" ]]
+          (
+            cd verify
+            sha256sum -c "${RELEASE_ASSET}.sha256"
+          )
+          mkdir verify/extracted
+          gzip -dc "verify/$RELEASE_ASSET" | tar --no-same-owner -xf - -C verify/extracted
+          [[ "$(sha256sum verify/extracted/protocore | awk '{print $1}')" == "$EXPECTED_BINARY_SHA256" ]]
+          (
+            cd verify/extracted
+            sha256sum -c ../protocore-v0.4.1-testnet-x86_64-linux.binary.sha256
+          )
+          jq -e \
+            --arg tag "v0.4.1-testnet" \
+            --arg binary_sha "$EXPECTED_BINARY_SHA256" \
+            --arg tarball_sha "$EXPECTED_TARBALL_SHA256" \
+            --arg workflow_commit "$target_commitish" \
+            --arg carrier_tag "$STAGING_TAG" \
+            '
+              .tag == $tag and
+              .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
+              .platforms["x86_64-linux"].tarball_sha256 == $tarball_sha and
+              .provenance.workflow_commit == $workflow_commit and
+              .publication.carrier_mode == "attestation-staging" and
+              .publication.carrier_tag == $carrier_tag and
+              .publication.temporary_attestation_staging == true and
+              .publication.draft_only == false
+            ' verify/release-v0.4.1-testnet.json >/dev/null
+
+      - name: Delete only the verified staging release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RELEASE_ID: ${{ inputs.staging_release_id }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/releases/${STAGING_RELEASE_ID}"
+          gh api \
+            --method DELETE \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${STAGING_TAG}"
+
+      - name: Prove staging release and tag are gone
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RELEASE_ID: ${{ inputs.staging_release_id }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/${STAGING_RELEASE_ID}" >/dev/null 2>&1; then
+            echo "::error::Temporary release still exists after cleanup"
+            exit 1
+          fi
+          matches="$(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+              | jq -s --arg tag "$STAGING_TAG" \
+                  '[.[][] | select(.tag_name == $tag)] | length'
+          )"
+          [[ "$matches" == "0" ]]
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${STAGING_TAG}" >/dev/null 2>&1; then
+            echo "::error::Temporary tag still exists after cleanup"
+            exit 1
+          fi
+          echo "PASS: temporary attestation staging release and tag were removed."

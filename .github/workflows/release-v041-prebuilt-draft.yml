@@ -49,7 +49,7 @@ concurrency:
 
 jobs:
   stage-sign-release:
-    name: verify, boot-smoke, sign, and stage exact bytes
+    name: verify, evidence-bind, sign, and stage exact bytes
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -75,22 +75,11 @@ jobs:
       GENESIS_SHA256: 0a02cabfb7d84cea3e77dcac76990ce3ceda233c7ba0d6f067d2b5b6e53dbb8a
       MILESTONES_SHA256: 7739c3d702b72586dd9880bafedb3967393fab679e4d2e3268d038bcd7c452e7
       NETWORK_REGISTRY_SHA256: ef296a44b8ea83626b9bfcbfff4df6b47049ed0cd910d07defc7dfa2ef7853d4
+      ACCEPTANCE_EVIDENCE_SHA256: 77c13973a357f969bbe3c34a97f56104bdcd363d7ade7123eaa36685f1278931
+      SOAK_EVIDENCE_SHA256: 11b7457f2476753b37090525f37853393c9b37e5b36c2b015ea96bcb0e3775cd
+      FRESH_COLDJOIN_EVIDENCE_SHA256: d90540a60d2af575ec4b7264e5bf909b62eb6b12a6d160378f1d36925b0e94ea
+      COLDJOIN_CORRECTION_MANIFEST_SHA256: 81dd1c5d883bf9902ef0acda2ab951cc81977a71dfa3eac5cb1f5eb8bd3fed5b
       ASSET_PLATFORM: x86_64-linux
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: protocore
-          POSTGRES_PASSWORD: protocore
-          POSTGRES_DB: protocore_smoke
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U protocore"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
 
     steps:
       - name: Preflight the manual one-off inputs
@@ -302,16 +291,24 @@ jobs:
           set -euo pipefail
           scripts/release-v041-prebuilt-stage.sh ingest/protocore "$GITHUB_WORKSPACE"
 
-      - name: Boot-smoke exact bytes against local R5 inputs
+      - name: Verify exact executable identity and resolve canonical R5 inputs
         env:
           SMOKE_REQUIRED_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
           SMOKE_EXPECT_VERSION: "0.4.0"
-          SMOKE_POSTGRES_URL: postgres://protocore:protocore@127.0.0.1:5432/protocore_smoke
-          SMOKE_TESTNET_MANIFEST_DIR: src/testnet
-          SMOKE_REGISTRY_NETWORK: testnet-69420
-          SMOKE_BOOT_PROBE_SECS: "300"
+          SMOKE_SKIP_BOOT: "1"
         run: |
           set -euo pipefail
+          binary="${{ steps.stage.outputs.binary_path }}"
+
+          # A truthful Posture-C node boot requires a registry row plus the
+          # matching sealed ML-DSA, P2P, and (for relays) PQ identity material.
+          # Those custody secrets must never be exported to CI, and a random
+          # throwaway key must never impersonate an accepted registry member.
+          # Execute the frozen artifact for its complete release identity and
+          # canonical genesis resolution here; bind actual node execution to
+          # the immutable accepted-fleet, soak, and fresh-coldjoin manifests.
+          scripts/release-boot-smoke.sh "$binary"
+
           smoke_root="$RUNNER_TEMP/r5-registry"
           smoke_chains="$smoke_root/chains"
           rm -rf "$smoke_root"
@@ -340,8 +337,30 @@ jobs:
           done
           curl -fsS "${base}/testnet-69420.toml" >/dev/null
 
-          export SMOKE_REGISTRY_URL="$base"
-          scripts/release-boot-smoke.sh "${{ steps.stage.outputs.binary_path }}"
+          resolve_home="$RUNNER_TEMP/r5-resolve-home"
+          "$binary" --home "$resolve_home" init testnet --no-operator >/dev/null
+          "$binary" --home "$resolve_home" genesis resolve \
+            --registry-network testnet-69420 \
+            --registry-url "$base" \
+            --no-write-peers >/dev/null
+          [[ "$(sha256sum "$resolve_home/genesis.toml" | awk '{print $1}')" == "$GENESIS_SHA256" ]]
+
+          for evidence_sha in \
+            "$ACCEPTANCE_EVIDENCE_SHA256" \
+            "$SOAK_EVIDENCE_SHA256" \
+            "$FRESH_COLDJOIN_EVIDENCE_SHA256" \
+            "$COLDJOIN_CORRECTION_MANIFEST_SHA256"
+          do
+            [[ "$evidence_sha" =~ ^[0-9a-f]{64}$ ]]
+          done
+          {
+            echo "### Immutable R5 live-execution evidence"
+            echo
+            echo "Acceptance manifest: \`${ACCEPTANCE_EVIDENCE_SHA256}\`"
+            echo "Soak manifest: \`${SOAK_EVIDENCE_SHA256}\`"
+            echo "Fresh-coldjoin manifest: \`${FRESH_COLDJOIN_EVIDENCE_SHA256}\`"
+            echo "Coldjoin correction manifest: \`${COLDJOIN_CORRECTION_MANIFEST_SHA256}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
@@ -398,6 +417,10 @@ jobs:
             --arg genesis_sha256 "$GENESIS_SHA256" \
             --arg milestones_sha256 "$MILESTONES_SHA256" \
             --arg network_registry_sha256 "$NETWORK_REGISTRY_SHA256" \
+            --arg acceptance_evidence_sha256 "$ACCEPTANCE_EVIDENCE_SHA256" \
+            --arg soak_evidence_sha256 "$SOAK_EVIDENCE_SHA256" \
+            --arg fresh_coldjoin_evidence_sha256 "$FRESH_COLDJOIN_EVIDENCE_SHA256" \
+            --arg coldjoin_correction_manifest_sha256 "$COLDJOIN_CORRECTION_MANIFEST_SHA256" \
             --arg manifest_inventory_sha256 "$MANIFEST_INVENTORY_SHA256" \
             --arg staging_release "$STAGING_RELEASE" \
             --arg attestation_staging_tag "$ATTESTATION_STAGING_TAG" \
@@ -405,7 +428,7 @@ jobs:
             --arg workflow_commit "$GITHUB_SHA" \
             --arg release_info "$release_info_name" \
             '{
-              schemaVersion: 2,
+              schemaVersion: 3,
               tag: $tag,
               channel: "testnet",
               distribution: {
@@ -437,6 +460,14 @@ jobs:
                 network_registry_sha256: $network_registry_sha256,
                 chain_registry_commit: $chain_registry_commit,
                 testnet_manifest_inventory_sha256: $manifest_inventory_sha256
+              },
+              live_execution_evidence: {
+                acceptance_manifest_sha256: $acceptance_evidence_sha256,
+                soak_manifest_sha256: $soak_evidence_sha256,
+                fresh_coldjoin_manifest_sha256: $fresh_coldjoin_evidence_sha256,
+                coldjoin_correction_manifest_sha256: $coldjoin_correction_manifest_sha256,
+                ci_boot_skipped: true,
+                ci_boot_skip_reason: "Posture-C exact node identity requires sealed custody material that must not be exported to CI"
               },
               platforms: {
                 ($platform): {
@@ -476,13 +507,23 @@ jobs:
             --arg tar_sha "$TARBALL_SHA256" \
             --arg binary_size "$BINARY_SIZE" \
             --arg network_registry_sha "$NETWORK_REGISTRY_SHA256" \
+            --arg acceptance_evidence_sha "$ACCEPTANCE_EVIDENCE_SHA256" \
+            --arg soak_evidence_sha "$SOAK_EVIDENCE_SHA256" \
+            --arg fresh_coldjoin_evidence_sha "$FRESH_COLDJOIN_EVIDENCE_SHA256" \
+            --arg coldjoin_correction_manifest_sha "$COLDJOIN_CORRECTION_MANIFEST_SHA256" \
             --arg publication_mode "$PUBLICATION_MODE" \
             '
+              .schemaVersion == 3 and
               .tag == $tag and
               .distribution.binary_version == "0.4.0" and
               .distribution.embedded_release_tag == null and
               .build.binary_size == ($binary_size | tonumber) and
               .chain.network_registry_sha256 == $network_registry_sha and
+              .live_execution_evidence.acceptance_manifest_sha256 == $acceptance_evidence_sha and
+              .live_execution_evidence.soak_manifest_sha256 == $soak_evidence_sha and
+              .live_execution_evidence.fresh_coldjoin_manifest_sha256 == $fresh_coldjoin_evidence_sha and
+              .live_execution_evidence.coldjoin_correction_manifest_sha256 == $coldjoin_correction_manifest_sha and
+              .live_execution_evidence.ci_boot_skipped == true and
               .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
               .platforms["x86_64-linux"].tarball_sha256 == $tar_sha and
               .publication.carrier_mode == $publication_mode and
@@ -507,9 +548,11 @@ jobs:
             TEMPORARY PUBLIC ATTESTATION STAGING — NOT A DISTRIBUTION RELEASE.
 
             These checksum-locked assets exist only so mono-core can attest the
-            exact frozen R5 bytes without a cross-repository credential. Delete
-            this prerelease and its tag after capturing the attestation artifact,
-            then enable immutable releases before creating the final draft.
+            exact frozen R5 bytes without a cross-repository credential. Release
+            metadata binds the bytes to the accepted fleet, soak, and fresh
+            coldjoin evidence manifests. Delete this prerelease and its tag after
+            capturing the attestation artifact, then enable immutable releases
+            before creating the final draft.
           files: |
             ${{ steps.stage.outputs.asset_path }}
             ${{ steps.stage.outputs.tarball_digest_path }}
@@ -538,7 +581,9 @@ jobs:
             DO NOT PUBLISH until the independent mono-core ML-DSA attestation
             bundle has been attached and every draft asset has been downloaded
             and reverified. The distribution tag is v0.4.1-testnet; the frozen
-            executable truthfully reports binary version 0.4.0.
+            executable truthfully reports binary version 0.4.0. The release
+            metadata binds these exact bytes to immutable accepted-fleet, soak,
+            and fresh-coldjoin evidence.
           files: |
             ${{ steps.stage.outputs.asset_path }}
             ${{ steps.stage.outputs.tarball_digest_path }}

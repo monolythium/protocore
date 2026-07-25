@@ -44,6 +44,10 @@ jobs:
       EXPECTED_TARBALL_SHA256: 5d03e6fb7110613b28a18cda013bd16731e5ddb02b0307fea205eacbc97f311e
       EXPECTED_BINARY_SHA256: 477704b170b620e9b52255b1dc26dddfcadb8664052867c1750ac40e3764851b
       EXPECTED_NETWORK_REGISTRY_SHA256: ef296a44b8ea83626b9bfcbfff4df6b47049ed0cd910d07defc7dfa2ef7853d4
+      EXPECTED_ACCEPTANCE_EVIDENCE_SHA256: 77c13973a357f969bbe3c34a97f56104bdcd363d7ade7123eaa36685f1278931
+      EXPECTED_SOAK_EVIDENCE_SHA256: 11b7457f2476753b37090525f37853393c9b37e5b36c2b015ea96bcb0e3775cd
+      EXPECTED_FRESH_COLDJOIN_EVIDENCE_SHA256: d90540a60d2af575ec4b7264e5bf909b62eb6b12a6d160378f1d36925b0e94ea
+      EXPECTED_COLDJOIN_CORRECTION_MANIFEST_SHA256: 81dd1c5d883bf9902ef0acda2ab951cc81977a71dfa3eac5cb1f5eb8bd3fed5b
 
     steps:
       - name: Preflight exact cleanup target
@@ -162,13 +166,23 @@ jobs:
             --arg binary_sha "$EXPECTED_BINARY_SHA256" \
             --arg tarball_sha "$EXPECTED_TARBALL_SHA256" \
             --arg network_registry_sha "$EXPECTED_NETWORK_REGISTRY_SHA256" \
+            --arg acceptance_evidence_sha "$EXPECTED_ACCEPTANCE_EVIDENCE_SHA256" \
+            --arg soak_evidence_sha "$EXPECTED_SOAK_EVIDENCE_SHA256" \
+            --arg fresh_coldjoin_evidence_sha "$EXPECTED_FRESH_COLDJOIN_EVIDENCE_SHA256" \
+            --arg coldjoin_correction_manifest_sha "$EXPECTED_COLDJOIN_CORRECTION_MANIFEST_SHA256" \
             --arg workflow_commit "$target_commitish" \
             --arg carrier_tag "$STAGING_TAG" \
             '
+              .schemaVersion == 3 and
               .tag == $tag and
               .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
               .platforms["x86_64-linux"].tarball_sha256 == $tarball_sha and
               .chain.network_registry_sha256 == $network_registry_sha and
+              .live_execution_evidence.acceptance_manifest_sha256 == $acceptance_evidence_sha and
+              .live_execution_evidence.soak_manifest_sha256 == $soak_evidence_sha and
+              .live_execution_evidence.fresh_coldjoin_manifest_sha256 == $fresh_coldjoin_evidence_sha and
+              .live_execution_evidence.coldjoin_correction_manifest_sha256 == $coldjoin_correction_manifest_sha and
+              .live_execution_evidence.ci_boot_skipped == true and
               .provenance.workflow_commit == $workflow_commit and
               .publication.carrier_mode == "attestation-staging" and
               .publication.carrier_tag == $carrier_tag and

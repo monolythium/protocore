@@ -56,6 +56,7 @@ jobs:
       RELEASE_TAG: v0.4.1-testnet
       STAGING_RELEASE: _prebuilt-staging-v041
       ATTESTATION_STAGING_TAG: v0.4.1-testnet-attestation-staging
+      EXPECTED_CHAIN_REGISTRY_COMMIT: de43e04bc2da6583f43233e7973e49eab0aecb15
       MONO_CORE_COMMIT: f052832c62ad5640fa7a419018bba4b120a18587
       MONO_CORE_TREE: 30a34766f75ee74b39ced71d8158666392f8e8e6
       MONO_CORE_CARGO_LOCK_SHA256: 00249cdc7cbeaac2cdaaae5e4f6a2e1aea8c51f95b3f96d459da5bd6cafe12de
@@ -96,6 +97,10 @@ jobs:
           }
           [[ "$CHAIN_REGISTRY_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
             echo "::error::chain_registry_commit must be a full lowercase 40-hex commit"
+            exit 1
+          }
+          [[ "$CHAIN_REGISTRY_COMMIT" == "$EXPECTED_CHAIN_REGISTRY_COMMIT" ]] || {
+            echo "::error::chain_registry_commit is not the reviewed exact R5 candidate"
             exit 1
           }
           case "$PUBLICATION_MODE" in
@@ -240,6 +245,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$(git -C registry rev-parse HEAD)" == "$CHAIN_REGISTRY_COMMIT" ]]
+          [[ "$CHAIN_REGISTRY_COMMIT" == "$EXPECTED_CHAIN_REGISTRY_COMMIT" ]]
           entry="registry/chains/testnet-69420.toml"
           genesis="registry/chains/genesis/testnet-69420.genesis.toml"
           milestones="registry/chains/milestones/testnet-69420.milestones.toml"
@@ -507,6 +513,7 @@ jobs:
             --arg tar_sha "$TARBALL_SHA256" \
             --arg binary_size "$BINARY_SIZE" \
             --arg network_registry_sha "$NETWORK_REGISTRY_SHA256" \
+            --arg chain_registry_commit "$EXPECTED_CHAIN_REGISTRY_COMMIT" \
             --arg acceptance_evidence_sha "$ACCEPTANCE_EVIDENCE_SHA256" \
             --arg soak_evidence_sha "$SOAK_EVIDENCE_SHA256" \
             --arg fresh_coldjoin_evidence_sha "$FRESH_COLDJOIN_EVIDENCE_SHA256" \
@@ -519,11 +526,14 @@ jobs:
               .distribution.embedded_release_tag == null and
               .build.binary_size == ($binary_size | tonumber) and
               .chain.network_registry_sha256 == $network_registry_sha and
+              .chain.chain_registry_commit == $chain_registry_commit and
               .live_execution_evidence.acceptance_manifest_sha256 == $acceptance_evidence_sha and
               .live_execution_evidence.soak_manifest_sha256 == $soak_evidence_sha and
               .live_execution_evidence.fresh_coldjoin_manifest_sha256 == $fresh_coldjoin_evidence_sha and
               .live_execution_evidence.coldjoin_correction_manifest_sha256 == $coldjoin_correction_manifest_sha and
               .live_execution_evidence.ci_boot_skipped == true and
+              .live_execution_evidence.ci_boot_skip_reason ==
+                "Posture-C exact node identity requires sealed custody material that must not be exported to CI" and
               .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
               .platforms["x86_64-linux"].tarball_sha256 == $tar_sha and
               .publication.carrier_mode == $publication_mode and
@@ -601,11 +611,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          release="$(
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
-              | jq -s --arg tag "$ATTESTATION_STAGING_TAG" \
-                  '[.[][] | select(.tag_name == $tag)]'
-          )"
+          release="[]"
+          for _ in $(seq 1 20); do
+            release="$(
+              gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+                | jq -s --arg tag "$ATTESTATION_STAGING_TAG" \
+                    '[.[][] | select(.tag_name == $tag)]'
+            )"
+            if jq -e \
+              --arg commit "$GITHUB_SHA" \
+              '
+                length == 1 and
+                .[0].draft == false and
+                .[0].prerelease == true and
+                .[0].target_commitish == $commit and
+                (.[0].assets | length) == 9
+              ' <<<"$release" >/dev/null
+            then
+              break
+            fi
+            sleep 1
+          done
           [[ "$(jq 'length' <<<"$release")" == 1 ]]
           jq -e \
             --arg commit "$GITHUB_SHA" \
@@ -649,11 +675,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          release="$(
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
-              | jq -s --arg tag "$RELEASE_TAG" \
-                  '[.[][] | select(.tag_name == $tag)]'
-          )"
+          release="[]"
+          for _ in $(seq 1 20); do
+            release="$(
+              gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+                | jq -s --arg tag "$RELEASE_TAG" \
+                    '[.[][] | select(.tag_name == $tag)]'
+            )"
+            if jq -e \
+              'length == 1 and .[0].draft == true and .[0].prerelease == true and (.[0].assets | length) == 9' \
+              <<<"$release" >/dev/null
+            then
+              break
+            fi
+            sleep 1
+          done
           [[ "$(jq 'length' <<<"$release")" == 1 ]]
           jq -e '.[0].draft == true and .[0].prerelease == true' <<<"$release" >/dev/null
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then

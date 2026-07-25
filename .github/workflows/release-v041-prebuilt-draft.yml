@@ -50,7 +50,7 @@ concurrency:
 jobs:
   stage-sign-release:
     name: verify, boot-smoke, sign, and stage exact bytes
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       RELEASE_TAG: v0.4.1-testnet

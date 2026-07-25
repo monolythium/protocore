@@ -1,4 +1,4 @@
-# One-off cleanup for the temporary public Posture-C V15 attestation staging
+# One-off cleanup for the temporary public Posture-C R5 attestation staging
 # release. It validates the exact release, assets, archive, and extracted binary
 # before deleting only that release ID and its exact tag. It cannot touch the
 # final v0.4.1-testnet draft or tag.
@@ -22,7 +22,7 @@ on:
         default: false
         type: boolean
       confirmation:
-        description: "Type delete-v041-attestation-staging/8bf6a99a"
+        description: "Type delete-v041-attestation-staging/477704b1"
         required: true
         type: string
 
@@ -41,8 +41,9 @@ jobs:
     env:
       STAGING_TAG: v0.4.1-testnet-attestation-staging
       RELEASE_ASSET: protocore-v0.4.1-testnet-x86_64-linux.tar.gz
-      EXPECTED_TARBALL_SHA256: c07cae5170221b833dbaebf1cb823767462e52162f21fa615851dcae8609941c
-      EXPECTED_BINARY_SHA256: 8bf6a99a727947b57f25eb15c1fbb5223cfc932659f4ff11fb0da37d0294f153
+      EXPECTED_TARBALL_SHA256: 5d03e6fb7110613b28a18cda013bd16731e5ddb02b0307fea205eacbc97f311e
+      EXPECTED_BINARY_SHA256: 477704b170b620e9b52255b1dc26dddfcadb8664052867c1750ac40e3764851b
+      EXPECTED_NETWORK_REGISTRY_SHA256: ef296a44b8ea83626b9bfcbfff4df6b47049ed0cd910d07defc7dfa2ef7853d4
 
     steps:
       - name: Preflight exact cleanup target
@@ -66,7 +67,7 @@ jobs:
             echo "::error::A lowercase SHA-256 of the captured attestation artifact is required"
             exit 1
           }
-          [[ "$CONFIRMATION" == "delete-v041-attestation-staging/8bf6a99a" ]] || {
+          [[ "$CONFIRMATION" == "delete-v041-attestation-staging/477704b1" ]] || {
             echo "::error::Exact cleanup confirmation did not match"
             exit 1
           }
@@ -160,12 +161,14 @@ jobs:
             --arg tag "v0.4.1-testnet" \
             --arg binary_sha "$EXPECTED_BINARY_SHA256" \
             --arg tarball_sha "$EXPECTED_TARBALL_SHA256" \
+            --arg network_registry_sha "$EXPECTED_NETWORK_REGISTRY_SHA256" \
             --arg workflow_commit "$target_commitish" \
             --arg carrier_tag "$STAGING_TAG" \
             '
               .tag == $tag and
               .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
               .platforms["x86_64-linux"].tarball_sha256 == $tarball_sha and
+              .chain.network_registry_sha256 == $network_registry_sha and
               .provenance.workflow_commit == $workflow_commit and
               .publication.carrier_mode == "attestation-staging" and
               .publication.carrier_tag == $carrier_tag and

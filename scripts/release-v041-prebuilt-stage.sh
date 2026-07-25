@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-off, byte-preserving stage gate for the Posture-C V15 testnet cut.
+# One-off, byte-preserving stage gate for the Posture-C R5 testnet cut.
 #
 # This script intentionally cannot build protocore. It accepts the already
 # frozen executable, verifies its complete embedded identity, copies those
@@ -26,17 +26,17 @@ set -euo pipefail
 readonly RELEASE_TAG="v0.4.1-testnet"
 readonly PLATFORM="x86_64-linux"
 readonly ASSET="protocore-${RELEASE_TAG}-${PLATFORM}.tar.gz"
-readonly EXPECTED_BINARY_SHA256="8bf6a99a727947b57f25eb15c1fbb5223cfc932659f4ff11fb0da37d0294f153"
-readonly EXPECTED_TARBALL_SHA256="c07cae5170221b833dbaebf1cb823767462e52162f21fa615851dcae8609941c"
-readonly EXPECTED_BINARY_SIZE="41204848"
+readonly EXPECTED_BINARY_SHA256="477704b170b620e9b52255b1dc26dddfcadb8664052867c1750ac40e3764851b"
+readonly EXPECTED_TARBALL_SHA256="5d03e6fb7110613b28a18cda013bd16731e5ddb02b0307fea205eacbc97f311e"
+readonly EXPECTED_BINARY_SIZE="41707840"
 readonly EXPECTED_VERSION="0.4.0"
-readonly EXPECTED_GIT_COMMIT="6d3ab40b8c3d0680242526bc0cb9d221e1055694"
-readonly EXPECTED_BUILD_TIMESTAMP_UTC="1784909426"
+readonly EXPECTED_GIT_COMMIT="f052832c62ad5640fa7a419018bba4b120a18587"
+readonly EXPECTED_BUILD_TIMESTAMP_UTC="1784993386"
 readonly EXPECTED_FEATURES="default,indexer-postgres,mdbx,mesh,sp1-verifier"
 readonly EXPECTED_PROFILE="release"
 readonly EXPECTED_TARGET="x86_64-unknown-linux-gnu"
 readonly EXPECTED_RUSTC="rustc 1.93.0 (254b59607 2026-01-19)"
-readonly EXPECTED_CLIENT_VERSION="protocore/v2/v0.4.0-testnet-42-g6d3ab40b+6d3ab40b"
+readonly EXPECTED_CLIENT_VERSION="protocore/v2/v0.4.0-testnet-53-gf052832c+f052832c62ad"
 readonly SOURCE_DATE_EPOCH="${EXPECTED_BUILD_TIMESTAMP_UTC}"
 
 fail() {
@@ -75,10 +75,10 @@ release_info_path="$out_dir/protocore-${RELEASE_TAG}-${PLATFORM}.release-info.js
 
 raw_sha="$(sha256sum "$binary" | awk '{print $1}')"
 [[ "$raw_sha" == "$EXPECTED_BINARY_SHA256" ]] \
-  || fail "input sha256 $raw_sha != frozen V15 sha256 $EXPECTED_BINARY_SHA256"
+  || fail "input sha256 $raw_sha != frozen R5 sha256 $EXPECTED_BINARY_SHA256"
 raw_size="$(stat -c '%s' "$binary")"
 [[ "$raw_size" == "$EXPECTED_BINARY_SIZE" ]] \
-  || fail "input size $raw_size != frozen V15 size $EXPECTED_BINARY_SIZE"
+  || fail "input size $raw_size != frozen R5 size $EXPECTED_BINARY_SIZE"
 
 info_json="$("$binary" --output json release info)" \
   || fail "frozen executable did not provide release info"
@@ -101,7 +101,7 @@ printf '%s\n' "$info_json" | jq -e \
     .target == $target and
     .rustc == $rustc
   ' >/dev/null \
-  || fail "release-info identity does not match the frozen V15 manifest"
+  || fail "release-info identity does not match the frozen R5 manifest"
 
 [[ "$("$binary" --version)" == "protocore $EXPECTED_VERSION" ]] \
   || fail "protocore --version does not report $EXPECTED_VERSION"

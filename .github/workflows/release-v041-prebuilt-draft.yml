@@ -1,4 +1,4 @@
-# One-off Posture-C V15 exact-byte release preparation.
+# One-off Posture-C R5 exact-byte release preparation.
 #
 # This workflow is deliberately:
 #   * manual-only (never runs on a tag or branch push),
@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       chain_registry_commit:
-        description: "Full 40-hex commit containing the reviewed V15 registry candidate"
+        description: "Full 40-hex commit containing the reviewed R5 registry candidate"
         required: true
         type: string
       publication_mode:
@@ -35,7 +35,7 @@ on:
         default: false
         type: boolean
       confirmation:
-        description: "Type the selected mode followed by /8bf6a99a"
+        description: "Type the selected mode followed by /477704b1"
         required: true
         type: string
 
@@ -56,23 +56,25 @@ jobs:
       RELEASE_TAG: v0.4.1-testnet
       STAGING_RELEASE: _prebuilt-staging-v041
       ATTESTATION_STAGING_TAG: v0.4.1-testnet-attestation-staging
-      MONO_CORE_COMMIT: 6d3ab40b8c3d0680242526bc0cb9d221e1055694
-      MONO_CORE_TREE: f53463b7f4ea3f56066ee850b8481574e9f98b8a
-      MONO_CORE_CARGO_LOCK_SHA256: a3c86ea26b02c71526f7fca120f128084ddf8e5354ebe454c02c8ef31e546ed7
-      BINARY_SHA256: 8bf6a99a727947b57f25eb15c1fbb5223cfc932659f4ff11fb0da37d0294f153
-      EXPECTED_TARBALL_SHA256: c07cae5170221b833dbaebf1cb823767462e52162f21fa615851dcae8609941c
+      MONO_CORE_COMMIT: f052832c62ad5640fa7a419018bba4b120a18587
+      MONO_CORE_TREE: 30a34766f75ee74b39ced71d8158666392f8e8e6
+      MONO_CORE_CARGO_LOCK_SHA256: 00249cdc7cbeaac2cdaaae5e4f6a2e1aea8c51f95b3f96d459da5bd6cafe12de
+      BINARY_SHA256: 477704b170b620e9b52255b1dc26dddfcadb8664052867c1750ac40e3764851b
+      EXPECTED_TARBALL_SHA256: 5d03e6fb7110613b28a18cda013bd16731e5ddb02b0307fea205eacbc97f311e
+      BINARY_SIZE: "41707840"
       BINARY_VERSION: 0.4.0
-      BINARY_BUILD_TIMESTAMP_UTC: "1784909426"
+      BINARY_BUILD_TIMESTAMP_UTC: "1784993386"
       BINARY_RUSTC: "rustc 1.93.0 (254b59607 2026-01-19)"
       BINARY_TARGET: x86_64-unknown-linux-gnu
       BINARY_PROFILE: release
       BINARY_FEATURES: default,indexer-postgres,mdbx,mesh,sp1-verifier
       PROTOCORE_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
-      CLIENT_VERSION: protocore/v2/v0.4.0-testnet-42-g6d3ab40b+6d3ab40b
+      CLIENT_VERSION: protocore/v2/v0.4.0-testnet-53-gf052832c+f052832c62ad
       CHAIN_ID: "69420"
-      GENESIS_HASH: 0xbf09dc062e1a3ce71e4fbe5833d1ebe546cce5c9dcbd4de3ee0c693690661666
-      GENESIS_SHA256: c94e8f7bf54211610838f62b2bd7192af00664ba409e81b77f360b518fb14283
-      MILESTONES_SHA256: 03dec827fb6e93c4f3e8ddf9d48b32bc0545b52cee4aa712f90ace6934da683b
+      GENESIS_HASH: "0x8dfc309dfe8e35b4ca036631c7dc25b29e618ac8a9694e0e2bbe23d0f98ab1fe"
+      GENESIS_SHA256: 0a02cabfb7d84cea3e77dcac76990ce3ceda233c7ba0d6f067d2b5b6e53dbb8a
+      MILESTONES_SHA256: 7739c3d702b72586dd9880bafedb3967393fab679e4d2e3268d038bcd7c452e7
+      NETWORK_REGISTRY_SHA256: ef296a44b8ea83626b9bfcbfff4df6b47049ed0cd910d07defc7dfa2ef7853d4
       ASSET_PLATFORM: x86_64-linux
 
     services:
@@ -113,14 +115,14 @@ jobs:
                 echo "::error::Operator must verify immutable releases remain disabled for temporary staging"
                 exit 1
               }
-              expected_confirmation="attestation-staging/8bf6a99a"
+              expected_confirmation="attestation-staging/477704b1"
               ;;
             final-draft)
               [[ "$IMMUTABLE_RELEASES_ENABLED" == "true" ]] || {
                 echo "::error::Operator must verify immutable releases are enabled before the final draft"
                 exit 1
               }
-              expected_confirmation="final-draft/8bf6a99a"
+              expected_confirmation="final-draft/477704b1"
               ;;
             *)
               echo "::error::Unknown publication mode"
@@ -134,6 +136,11 @@ jobs:
 
       - name: Checkout protocore release repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test fail-closed R5 registry gate
+        run: |
+          set -euo pipefail
+          scripts/test-release-v041-registry-entry.sh
 
       - name: Refuse conflicting release state
         env:
@@ -206,7 +213,7 @@ jobs:
           repository: monolythium/mono-core
           token: ${{ steps.app_token.outputs.token }}
           path: src
-          ref: 6d3ab40b8c3d0680242526bc0cb9d221e1055694
+          ref: f052832c62ad5640fa7a419018bba4b120a18587
           fetch-depth: 1
 
       - name: Verify frozen source identity and local testnet manifests
@@ -229,7 +236,7 @@ jobs:
           echo "manifest_path=$manifest_out" >>"$GITHUB_OUTPUT"
           echo "manifest_inventory_sha256=$manifest_inventory_sha" >>"$GITHUB_OUTPUT"
 
-      - name: Checkout commit-pinned V15 chain-registry candidate
+      - name: Checkout commit-pinned R5 chain-registry candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: monolythium/chain-registry
@@ -237,7 +244,7 @@ jobs:
           ref: ${{ inputs.chain_registry_commit }}
           fetch-depth: 1
 
-      - name: Verify V15 registry candidate and canonical bytes
+      - name: Verify R5 registry candidate and canonical bytes
         id: registry
         env:
           CHAIN_REGISTRY_COMMIT: ${{ inputs.chain_registry_commit }}
@@ -247,19 +254,11 @@ jobs:
           entry="registry/chains/testnet-69420.toml"
           genesis="registry/chains/genesis/testnet-69420.genesis.toml"
           milestones="registry/chains/milestones/testnet-69420.milestones.toml"
+          [[ -f "$genesis" && ! -L "$genesis" ]]
+          [[ -f "$milestones" && ! -L "$milestones" ]]
           [[ "$(sha256sum "$genesis" | awk '{print $1}')" == "$GENESIS_SHA256" ]]
           [[ "$(sha256sum "$milestones" | awk '{print $1}')" == "$MILESTONES_SHA256" ]]
-          grep -Eq "^chain_id[[:space:]]*=[[:space:]]*${CHAIN_ID}$" "$entry"
-          grep -Eq "^genesis_hash[[:space:]]*=[[:space:]]*\"${GENESIS_HASH}\"$" "$entry"
-          grep -Eq "^genesis_sha256[[:space:]]*=[[:space:]]*\"${GENESIS_SHA256}\"$" "$entry"
-          grep -Eq "^milestones_sha256[[:space:]]*=[[:space:]]*\"${MILESTONES_SHA256}\"$" "$entry"
-          grep -Eq "^binary_sha[[:space:]]*=[[:space:]]*\"${MONO_CORE_COMMIT}\"$" "$entry"
-          grep -Eq "^binary_release_sha256[[:space:]]*=[[:space:]]*\"${BINARY_SHA256}\"$" "$entry"
-          grep -Eq "^release_tag[[:space:]]*=[[:space:]]*\"${RELEASE_TAG}\"$" "$entry"
-          if grep -Eq '^[[:space:]]*release_tarball_sha256[[:space:]]*=' "$entry"; then
-            echo "::error::Candidate must not invent a tarball digest before this workflow creates it"
-            exit 1
-          fi
+          scripts/verify-release-v041-registry-entry.sh "$entry"
           npm --prefix registry ci --ignore-scripts
           npm --prefix registry run validate
           echo "commit=$CHAIN_REGISTRY_COMMIT" >>"$GITHUB_OUTPUT"
@@ -303,7 +302,7 @@ jobs:
           set -euo pipefail
           scripts/release-v041-prebuilt-stage.sh ingest/protocore "$GITHUB_WORKSPACE"
 
-      - name: Boot-smoke exact bytes against local V15 inputs
+      - name: Boot-smoke exact bytes against local R5 inputs
         env:
           SMOKE_REQUIRED_FEATURES: mdbx,indexer-postgres,mesh,sp1-verifier
           SMOKE_EXPECT_VERSION: "0.4.0"
@@ -313,7 +312,7 @@ jobs:
           SMOKE_BOOT_PROBE_SECS: "300"
         run: |
           set -euo pipefail
-          smoke_root="$RUNNER_TEMP/v15-registry"
+          smoke_root="$RUNNER_TEMP/r5-registry"
           smoke_chains="$smoke_root/chains"
           rm -rf "$smoke_root"
           mkdir -p "$smoke_chains/genesis" "$smoke_chains/milestones"
@@ -332,7 +331,7 @@ jobs:
           python3 -m http.server "$port" \
             --bind 127.0.0.1 \
             --directory "$smoke_chains" \
-            >"$RUNNER_TEMP/v15-registry-http.log" 2>&1 &
+            >"$RUNNER_TEMP/r5-registry-http.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for _ in $(seq 1 20); do
@@ -382,6 +381,7 @@ jobs:
             --arg platform "$ASSET_PLATFORM" \
             --arg tarball_sha256 "$TARBALL_SHA256" \
             --arg binary_sha256 "$BINARY_SHA256" \
+            --arg binary_size "$BINARY_SIZE" \
             --arg binary_version "$BINARY_VERSION" \
             --arg build_timestamp_utc "$BINARY_BUILD_TIMESTAMP_UTC" \
             --arg rustc "$BINARY_RUSTC" \
@@ -397,6 +397,7 @@ jobs:
             --arg genesis_hash "$GENESIS_HASH" \
             --arg genesis_sha256 "$GENESIS_SHA256" \
             --arg milestones_sha256 "$MILESTONES_SHA256" \
+            --arg network_registry_sha256 "$NETWORK_REGISTRY_SHA256" \
             --arg manifest_inventory_sha256 "$MANIFEST_INVENTORY_SHA256" \
             --arg staging_release "$STAGING_RELEASE" \
             --arg attestation_staging_tag "$ATTESTATION_STAGING_TAG" \
@@ -421,6 +422,7 @@ jobs:
                 cargo_lock_sha256: $cargo_lock_sha256
               },
               build: {
+                binary_size: ($binary_size | tonumber),
                 build_timestamp_utc: ($build_timestamp_utc | tonumber),
                 rustc: $rustc,
                 target: $target,
@@ -432,6 +434,7 @@ jobs:
                 genesis_hash: $genesis_hash,
                 genesis_sha256: $genesis_sha256,
                 milestones_sha256: $milestones_sha256,
+                network_registry_sha256: $network_registry_sha256,
                 chain_registry_commit: $chain_registry_commit,
                 testnet_manifest_inventory_sha256: $manifest_inventory_sha256
               },
@@ -471,11 +474,15 @@ jobs:
             --arg tag "$RELEASE_TAG" \
             --arg binary_sha "$BINARY_SHA256" \
             --arg tar_sha "$TARBALL_SHA256" \
+            --arg binary_size "$BINARY_SIZE" \
+            --arg network_registry_sha "$NETWORK_REGISTRY_SHA256" \
             --arg publication_mode "$PUBLICATION_MODE" \
             '
               .tag == $tag and
               .distribution.binary_version == "0.4.0" and
               .distribution.embedded_release_tag == null and
+              .build.binary_size == ($binary_size | tonumber) and
+              .chain.network_registry_sha256 == $network_registry_sha and
               .platforms["x86_64-linux"].extracted_binary_sha256 == $binary_sha and
               .platforms["x86_64-linux"].tarball_sha256 == $tar_sha and
               .publication.carrier_mode == $publication_mode and
@@ -500,7 +507,7 @@ jobs:
             TEMPORARY PUBLIC ATTESTATION STAGING — NOT A DISTRIBUTION RELEASE.
 
             These checksum-locked assets exist only so mono-core can attest the
-            exact frozen V15 bytes without a cross-repository credential. Delete
+            exact frozen R5 bytes without a cross-repository credential. Delete
             this prerelease and its tag after capturing the attestation artifact,
             then enable immutable releases before creating the final draft.
           files: |
@@ -526,7 +533,7 @@ jobs:
           make_latest: false
           fail_on_unmatched_files: true
           body: |
-            Posture-C V15 exact-byte testnet distribution draft.
+            Posture-C R5 exact-byte testnet distribution draft.
 
             DO NOT PUBLISH until the independent mono-core ML-DSA attestation
             bundle has been attached and every draft asset has been downloaded
